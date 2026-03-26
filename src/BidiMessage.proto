@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package jbidi;
+
+message Message {
+  oneof message {
+    PingMessage ping = 1;
+    PongMessage pong = 2;
+    SubMessage sub = 3;
+    UnsubMessage unsub = 4;
+    PubMessage pub = 5;
+    ReqMessage req = 6;
+    ResMessage res = 7;
+    PushMessage push = 8;
+  }
+}
+
+message PingMessage {
+}
+
+message PongMessage {
+}
+
+message SubMessage {
+  string id = 1;
+  bytes body = 2;
+}
+
+message UnsubMessage {
+  string id = 1;
+}
+
+message PubMessage {
+  string id = 1;
+  bytes body = 2;
+}
+
+message ReqMessage {
+  string id = 1;
+  bytes body = 2;
+}
+
+message ResMessage {
+  string id = 1;
+  bytes body = 2;
+  string error = 3;
+  string code = 4;
+}
+
+message PushMessage {
+  string id = 1;
+  bytes body = 2;
+}

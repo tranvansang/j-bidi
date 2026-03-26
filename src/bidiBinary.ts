@@ -1,0 +1,276 @@
+import {makeDisposer} from 'jdisposer'
+import {protoDecodeJson, protoEncodeJson, ProtoMessage} from './protobuf.js'
+
+export type BidiEndpointBinary = ReturnType<typeof makeBidiEndpointBinary>
+export function makeBidiEndpointBinary({
+	send,
+	subscribe,
+	request,
+	push,
+}: {
+	send(message: Uint8Array): void
+	subscribe?(body: any, onData: (data: Uint8Array) => void): void | (() => void)
+	request?(body: any, signal: AbortSignal): Promise<Uint8Array>
+	push?(body: any): any
+}) {
+	const disposer = makeDisposer()
+
+	let pong: (() => void) | undefined
+
+	// subscription to response to partner. need to unsub when
+	// - partner unsubscribes
+	// - connection closes
+	const unsubs: Record<string, () => any> = {}
+	disposer.add(() => {
+		for (const [key, unsub] of Object.entries(unsubs)) {
+			unsub?.()
+			delete unsubs[key]
+		}
+	})
+
+	// callback of subscription we are subscribing to
+	const subs: Record<string, (data: Uint8Array) => any> = {}
+
+	// requests we sent to partner and are waiting for response
+	const defers: Record<string, PromiseWithResolvers<Uint8Array>> = {}
+
+	// requests list we need to response when partner sends us
+	// need to abort local processes if the partner sends but connection closes before finishing processing
+	const reqs: Record<string, () => void> = {}
+	disposer.add(() => {
+		for (const [key, abort] of Object.entries(reqs)) {
+			abort?.()
+			delete reqs[key]
+		}
+	})
+
+	return {
+		send(this: void, message: Uint8Array) {
+			const decoded = (() => {
+				try {
+					return ProtoMessage.decode(message) as any
+				} catch (e) {
+					logJson({
+						level: 'warn',
+						message: 'bidirectional message decode error',
+						error: (e as Error).message,
+						trace: (e as Error).stack,
+					})
+				}
+			})()
+			if (!decoded) return
+
+			if (decoded.ping)
+				send(
+					ProtoMessage.encode({
+						pong: {},
+					}).finish(),
+				)
+			else if (decoded.pong) pong?.()
+			else if (decoded.sub) {
+				const {id, body} = decoded.sub
+				if (!id) return
+				unsubs[id]?.()
+				let decodedBody
+				try {
+					decodedBody = protoDecodeJson(body)
+				} catch (e) {
+					return logJson({
+						level: 'warn',
+						message: 'bidirectional message decode error for sub',
+						error: (e as Error).message,
+						trace: (e as Error).stack,
+						id,
+						bodyLength: body?.byteLength,
+					})
+				}
+				const sub = subscribe?.(decodedBody, data =>
+					send(
+						ProtoMessage.encode({
+							pub: {
+								id,
+								body: data,
+							},
+						}).finish(),
+					),
+				)
+				if (sub) unsubs[id] = sub
+			} else if (decoded.unsub) {
+				const {id} = decoded.unsub
+				if (!id) return
+				unsubs[id]?.()
+				delete unsubs[id]
+			} else if (decoded.pub) {
+				const {id, body} = decoded.pub
+				if (!id) return
+				void (async () => {
+					try {
+						await subs[id]?.(body)
+					} catch (e) {
+						logJson({
+							level: 'warn',
+							message: 'bidirectional message pub error',
+							error: (e as Error).message,
+							trace: (e as Error).stack,
+							bodyLength: body?.byteLength,
+							id,
+						})
+					}
+				})()
+			} else if (decoded.req) {
+				const {id, body} = decoded.req
+				if (!id) return
+				if (request) {
+					const abortController = new AbortController()
+					reqs[id]?.()
+					reqs[id] = abortController.abort.bind(abortController)
+					void (async () => {
+						try {
+							send(
+								ProtoMessage.encode({
+									res: {
+										id,
+										body: await request(protoDecodeJson(body), abortController.signal),
+									},
+								}).finish(),
+							)
+						} catch (e) {
+							send(
+								ProtoMessage.encode({
+									res: {
+										id,
+										error: (e as Error).message,
+										code: (e as any).code,
+									},
+								}).finish(),
+							)
+						} finally {
+							delete reqs[id]
+						}
+					})()
+				}
+			} else if (decoded.res) {
+				const {id, body, error, code} = decoded.res
+				if (!id) return
+				const defer = defers[id]
+				if (defer) {
+					if (error || code) defer.reject(new Error(error || 'unknown error', {cause: {code}}))
+					else defer.resolve(body)
+				}
+			} else if (decoded.push) {
+				const {body} = decoded.push
+				let decodedBody
+				try {
+					decodedBody = protoDecodeJson(body)
+				} catch (e) {
+					return logJson({
+						level: 'warn',
+						message: 'bidirectional message decode error for push',
+						error: (e as Error).message,
+						trace: (e as Error).stack,
+						bodyLength: body?.byteLength,
+					})
+				}
+				push?.(decodedBody)
+			} else console.warn('unknown bidirectional message', decoded)
+		},
+		ping(this: void) {
+			send(
+				ProtoMessage.encode({
+					ping: {},
+				}).finish(),
+			)
+		},
+		set pong(cb: undefined | (() => void)) {
+			pong = cb
+		},
+		request<T>(
+			this: void,
+			body: any,
+			{
+				timeout = 10_000,
+				signal,
+			}: {
+				timeout?: number
+				signal?: AbortSignal
+			} = {},
+		) {
+			const disposer = makeDisposer()
+			const defer = Promise.withResolvers<Uint8Array>()
+
+			const id = crypto.randomUUID()
+			defers[id]?.reject(new Error('duplicated request id'))
+			defers[id] = defer
+			disposer.add(() => void delete defers[id])
+
+			const abortError = new DOMException('Aborted', 'AbortError')
+			if (signal?.aborted) defer.reject(abortError)
+			else {
+				if (signal) {
+					signal.addEventListener('abort', abort)
+					disposer.add(() => signal.removeEventListener('abort', abort))
+					function abort() {
+						defer.reject(abortError)
+					}
+				}
+
+				if (timeout) {
+					const timer = setTimeout(() => defer.reject(new Error('timeout')), timeout)
+					disposer.add(() => clearTimeout(timer))
+				}
+
+				send(
+					ProtoMessage.encode({
+						req: {
+							id,
+							body: protoEncodeJson(body),
+						},
+					}).finish(),
+				)
+			}
+
+			return (async () => {
+				try {
+					return await defer.promise
+				} finally {
+					disposer.dispose()
+				}
+			})()
+		},
+		subscribe(this: void, body: any, onData: (data: Uint8Array) => void) {
+			const id = crypto.randomUUID()
+			send(
+				ProtoMessage.encode({
+					sub: {
+						id,
+						body: protoEncodeJson(body),
+					},
+				}).finish(),
+			)
+			subs[id] = onData
+			return () => {
+				delete subs[id]
+				send(
+					ProtoMessage.encode({
+						unsub: {id},
+					}).finish(),
+				)
+			}
+		},
+		push(body: any) {
+			send(
+				ProtoMessage.encode({
+					push: {
+						id: crypto.randomUUID(),
+						body: protoEncodeJson(body),
+					},
+				}).finish(),
+			)
+		},
+		dispose: disposer.dispose,
+	}
+}
+
+function logJson(json: any) {
+	console.log(JSON.stringify(json))
+}

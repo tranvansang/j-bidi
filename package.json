@@ -1,0 +1,31 @@
+{
+	"name": "j-bidi",
+	"version": "0.0.1",
+	"scripts": {
+		"prepublishOnly": "npx tsc"
+	},
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./node": {
+			"types": "./dist/node.d.ts",
+			"import": "./dist/node.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"devDependencies": {
+		"@types/ws": "^8.18.1",
+		"typescript": "^6.0.2"
+	},
+	"dependencies": {
+		"j-atom": "^0.1.0",
+		"jdisposer": "^0.0.1",
+		"jrx": "^0.2.1",
+		"protobufjs": "^8.0.0",
+		"ws": "^8.20.0"
+	}
+}
