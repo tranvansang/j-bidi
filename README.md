@@ -4,6 +4,13 @@ Bidirectional messaging library supporting request-response, subscriptions, and 
 Works with both binary and plain JSON encoding.
 Ships with browser WebSocket and Node.js `ws` backends, or bring your own transport.
 
+## Requirements
+
+This library uses the [Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management) API (`using`, `DisposableStack`). Your environment needs:
+
+- A **runtime polyfill** (e.g. `core-js`, Node.js ≥ 22, or a browser with native support)
+- A **transpiler** that supports the `using` keyword (TypeScript ≥ 5.2 or Babel with `@babel/plugin-proposal-explicit-resource-management`)
+
 ## Install
 
 ```bash
@@ -31,7 +38,7 @@ import {makeAtom} from 'j-atom'
 const endpointAtom = makeAtom<BidiEndpointBinary | undefined>()
 
 // Connect with auto-reconnect and heartbeat
-const dispose = addBidiEndpointWeb(endpointAtom, 'wss://example.com/ws', {
+using connection = addBidiEndpointWeb(endpointAtom, 'wss://example.com/ws', {
 	subscribe(body, onData) {
 		if (body?.path === '/topic') {
 			return dataAtom.sub(data => onData(encode(data)))
@@ -71,7 +78,7 @@ import {makeAtom} from 'j-atom'
 
 const endpointAtom = makeAtom<BidiEndpointBinary | undefined>()
 
-const dispose = addBidiEndpointNode(endpointAtom, 'wss://example.com/ws', {
+using connection = addBidiEndpointNode(endpointAtom, 'wss://example.com/ws', {
 	subscribe(body, onData) {
 		if (body?.path === '/topic') {
 			return sensorAtom.sub(data => onData(encode(data)))
@@ -87,10 +94,10 @@ import {makeBidiEndpointBinary} from 'j-bidi'
 import {addNodeWsHeartBeat} from 'j-bidi/node'
 
 wsServer.handleUpgrade(req, socket, head, ws => {
-	const disposer = makeDisposer()
-	disposer.add(addNodeWsHeartBeat(ws))
+	const stack = new DisposableStack()
+	stack.adopt(addNodeWsHeartBeat(ws), fn => fn())
 
-	const endpoint = makeBidiEndpointBinary({
+	const endpoint = stack.use(makeBidiEndpointBinary({
 		send(message) {
 			if (ws.readyState === WebSocket.OPEN) ws.send(message)
 		},
@@ -105,12 +112,12 @@ wsServer.handleUpgrade(req, socket, head, ws => {
 					return handleSetRtc(body)
 			}
 		},
-	})
+	}))
 
-	disposer.add(endpoint.dispose)
 	ws.on('message', data => {
 		if (data instanceof Uint8Array) endpoint.send(data)
 	})
+	ws.on('close', () => stack.dispose())
 })
 ```
 
@@ -122,7 +129,7 @@ Use `makeBidiEndpointPlain` with any transport — Web Workers, postMessage, etc
 import {makeBidiEndpointPlain} from 'j-bidi'
 
 // Example: bidirectional messaging over a Web Worker
-const endpoint = makeBidiEndpointPlain({
+using endpoint = makeBidiEndpointPlain({
 	send(message) {
 		postMessage(message)
 	},
@@ -168,31 +175,31 @@ Create an endpoint. Options:
 - `subscribe(body, onData)` — handler for incoming subscriptions, return unsubscribe function
 - `push(body)` — handler for incoming push messages
 
-Returns an endpoint with:
+Returns a `Disposable` endpoint with:
 
 - `send(message)` — feed incoming messages from the peer
 - `request(body, options?)` — send a request (`options: {timeout?, signal?}`)
 - `subscribe(body, onData)` — subscribe to a topic, returns unsubscribe function
 - `push(body)` — send a push message
-- `dispose()` — cleanup
+- `[Symbol.dispose]()` — cleanup (use with `using`)
 
 #### `addBidiEndpointWeb(endpointAtom, wsUrl, options?)`
 
-Connect via browser WebSocket with auto-reconnect and heartbeat. Returns a dispose function.
+Connect via browser WebSocket with auto-reconnect and heartbeat. Returns a `DisposableStack`.
 
 ### `j-bidi/node`
 
 #### `addBidiEndpointNode(endpointAtom, wsUrl, options?)`
 
-Connect via Node.js `ws` with auto-reconnect and heartbeat. Returns a dispose function.
+Connect via Node.js `ws` with auto-reconnect and heartbeat. Returns a `DisposableStack`.
 
 #### `connectWsNode(options)`
 
-Low-level Node.js WebSocket connection. Options: `url`, `disposer`, `atom`, `resetBackoff?`, `disableDeflate?`.
+Low-level Node.js WebSocket connection. Returns a `Disposable & Promise<void>`. Options: `url`, `atom`, `resetBackoff?`, `disableDeflate?`.
 
 #### `addNodeWsHeartBeat(ws)`
 
-Add ping/pong heartbeat to a Node.js WebSocket. Returns a cleanup function.
+Add ping/pong heartbeat to a Node.js WebSocket. Returns a cleanup function (call it or use with `DisposableStack.adopt`).
 
 ## License
 

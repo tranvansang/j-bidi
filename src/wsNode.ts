@@ -1,5 +1,4 @@
 import {WebSocket as WsWebSocket} from 'ws'
-import {type Disposer, makeDisposer} from 'jdisposer'
 import {type Atom, makeAtom} from 'j-atom'
 import {BidiEndpointBinary} from './bidiBinary.js'
 import {addBidiEndpointShared, connectWsShared} from './wsShared.js'
@@ -41,26 +40,31 @@ function logJson(json: any) {
 	console.log(JSON.stringify(json))
 }
 
-export async function connectWsNode({
+export function connectWsNode({
 	url,
 	disableDeflate,
 	...params
 }: {
 	url: string
-	disposer: Disposer
 	atom: Atom<WsWebSocket | undefined>
 	resetBackoff?(): void
 	disableDeflate?: boolean
 }) {
-	const ws = new WsWebSocket(url, {
-		perMessageDeflate: !disableDeflate,
-	})
+	using stack = new DisposableStack()
+	const ws = stack.adopt(
+		new WsWebSocket(url, {
+			perMessageDeflate: !disableDeflate,
+		}),
+		ws => {
+			if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'closed')
+		},
+	)
 	ws.binaryType = 'arraybuffer'
-
-	params.disposer.add(() => {
-		if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'closed')
+	const promise = stack.use(connectWsShared(ws, params))
+	const moved = stack.move()
+	return Object.assign(promise, {
+		[Symbol.dispose]: moved[Symbol.dispose].bind(moved),
 	})
-	return connectWsShared(ws, params)
 }
 
 export function addBidiEndpointNode(
@@ -72,16 +76,17 @@ export function addBidiEndpointNode(
 		push?(body: any): any
 	},
 ) {
-	const disposer = makeDisposer()
+	using stack = new DisposableStack()
 
 	const endpointAndWsAtom = makeAtom<{endpoint: BidiEndpointBinary; ws: WsWebSocket} | undefined>()
-	disposer.add(addBidiEndpointShared(connectWsNode, endpointAndWsAtom, wsPath, options))
-	disposer.add(
+	stack.use(addBidiEndpointShared(connectWsNode, endpointAndWsAtom, wsPath, options))
+	stack.adopt(
 		endpointAndWsAtom.sub(endpointAndWs => {
 			endpointAtom.value = endpointAndWs?.endpoint
 			if (endpointAndWs) return addNodeWsHeartBeat(endpointAndWs.ws)
 		}),
+		x => x(),
 	)
 
-	return disposer.dispose
+	return stack.move()
 }

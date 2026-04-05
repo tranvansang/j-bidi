@@ -1,23 +1,18 @@
-import {type Disposer, makeDisposer} from 'jdisposer'
 import {type Atom, makeAtom} from 'j-atom'
 import {type BidiEndpointBinary} from './bidiBinary.js'
 import {addBidiEndpointShared, connectWsShared} from './wsShared.js'
 
-async function connectWsWeb({
-	url,
-	...params
-}: {
-	disposer: Disposer
-	atom: Atom<WebSocket | undefined>
-	url: string
-	resetBackoff?(): void
-}) {
-	const ws = new WebSocket(url)
-	ws.binaryType = 'arraybuffer'
-	params.disposer.add(() => {
+function connectWsWeb({url, ...params}: {atom: Atom<WebSocket | undefined>; url: string; resetBackoff?(): void}) {
+	using stack = new DisposableStack()
+	const ws = stack.adopt(new WebSocket(url), ws => {
 		if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'closed')
 	})
-	return connectWsShared(ws, params)
+	ws.binaryType = 'arraybuffer'
+	const promise = stack.use(connectWsShared(ws, params))
+	const moved = stack.move()
+	return Object.assign(promise, {
+		[Symbol.dispose]: moved[Symbol.dispose].bind(moved),
+	})
 }
 
 export function addBidiEndpointWeb(
@@ -29,12 +24,12 @@ export function addBidiEndpointWeb(
 		push?(body: any): any
 	},
 ) {
-	const disposer = makeDisposer()
+	using stack = new DisposableStack()
 	const endpointAndWsAtom = makeAtom<{endpoint: BidiEndpointBinary; ws: WebSocket} | undefined>()
 
-	disposer.add(addBidiEndpointShared<WebSocket>(connectWsWeb, endpointAndWsAtom, wsPath, options))
+	stack.use(addBidiEndpointShared<WebSocket>(connectWsWeb, endpointAndWsAtom, wsPath, options))
 
-	disposer.add(
+	stack.adopt(
 		endpointAndWsAtom.sub(endpointAndWs => {
 			endpointAtom.value = endpointAndWs?.endpoint
 			if (endpointAndWs) {
@@ -64,7 +59,8 @@ export function addBidiEndpointWeb(
 				}
 			}
 		}),
+		x => x(),
 	)
 
-	return disposer.dispose
+	return stack.move()
 }

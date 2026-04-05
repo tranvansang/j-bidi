@@ -1,6 +1,3 @@
-import {makeDisposer} from 'jdisposer'
-import {addEvtListener} from 'jrx'
-
 type SendPayload =
 	| {
 			path: '/ping'
@@ -52,15 +49,14 @@ export function makeBidiEndpointPlain({
 	request?(body: any, signal: AbortSignal): Promise<any>
 	push?(body: any): any
 }) {
-	const disposer = makeDisposer()
+	using stack = new DisposableStack()
 
 	let pong: (() => void) | undefined
 
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
 	// - connection closes
-	const unsubs: Record<string, () => any> = {}
-	disposer.add(() => {
+	const unsubs = stack.adopt({} as Record<string, () => any>, unsubs => {
 		for (const [key, unsub] of Object.entries(unsubs)) {
 			unsub?.()
 			delete unsubs[key]
@@ -75,14 +71,14 @@ export function makeBidiEndpointPlain({
 
 	// requests list we need to response when partner sends us
 	// need to abort local processes if the partner sends but connection closes before finishing processing
-	const reqs: Record<string, () => void> = {}
-	disposer.add(() => {
+	const reqs = stack.adopt({} as Record<string, () => void>, reqs => {
 		for (const [key, abort] of Object.entries(reqs)) {
 			abort?.()
 			delete reqs[key]
 		}
 	})
 
+	const moved = stack.move()
 	return {
 		send(this: void, message: SendPayload) {
 			switch (message?.path) {
@@ -187,7 +183,7 @@ export function makeBidiEndpointPlain({
 		set pong(cb: undefined | (() => void)) {
 			pong = cb
 		},
-		request<T>(
+		async request<T>(
 			this: void,
 			body: any,
 			{
@@ -199,26 +195,26 @@ export function makeBidiEndpointPlain({
 			} = {},
 			...rest: any[]
 		) {
-			const disposer = makeDisposer()
+			using stack = new DisposableStack()
 			const defer = Promise.withResolvers<T>()
 
 			const id = crypto.randomUUID()
 			defers[id]?.reject(new Error('duplicated request id'))
 			defers[id] = defer
-			disposer.add(() => void delete defers[id])
+			stack.defer(() => void delete defers[id])
 
 			const abortError = new DOMException('Aborted', 'AbortError')
 			if (signal?.aborted) defer.reject(abortError)
 			else {
-				if (signal) disposer.add(
-						addEvtListener(signal, 'abort', () =>
-							defer.reject(abortError)
-					))
+				signal?.addEventListener('abort', () => defer.reject(abortError), {
+					signal: stack.adopt(new AbortController(), controller => controller.abort()).signal,
+				})
 
-				if (timeout) {
-					const timer = setTimeout(() => defer.reject(new Error('timeout')), timeout)
-					disposer.add(() => clearTimeout(timer))
-				}
+				if (timeout)
+					stack.adopt(
+						setTimeout(() => defer.reject(new Error('timeout')), timeout),
+						clearTimeout,
+					)
 
 				send(
 					{
@@ -230,13 +226,7 @@ export function makeBidiEndpointPlain({
 				)
 			}
 
-			return (async () => {
-				try {
-					return await defer.promise
-				} finally {
-					disposer.dispose()
-				}
-			})()
+			return await defer.promise
 		},
 		subscribe<T>(this: void, body: any, onData: (data: T) => void, ...rest: any[]) {
 			const id = crypto.randomUUID()
@@ -264,7 +254,7 @@ export function makeBidiEndpointPlain({
 				...rest,
 			)
 		},
-		dispose: disposer.dispose,
+		[Symbol.dispose]: moved[Symbol.dispose].bind(moved),
 	}
 }
 
