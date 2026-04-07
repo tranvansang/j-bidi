@@ -56,7 +56,7 @@ using connection = makeBidiEndpointWeb(endpointAtom, 'wss://example.com/ws', {
 const endpoint = endpointAtom.value
 
 // Subscribe to server data
-const unsub = endpoint?.subscribe({path: '/topic', name: '/events'}, data => {
+using unsub = endpoint?.subscribe({path: '/topic', name: '/events'}, data => {
 	console.log('event:', data)
 })
 

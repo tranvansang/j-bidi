@@ -237,13 +237,15 @@ export function makeBidiEndpointBinary({
 				}).finish(),
 			)
 			subs[id] = onData
-			return () => {
-				delete subs[id]
-				send(
-					ProtoMessage.encode({
-						unsub: {id},
-					}).finish(),
-				)
+			return {
+				[Symbol.dispose]() {
+					delete subs[id]
+					send(
+						ProtoMessage.encode({
+							unsub: {id},
+						}).finish(),
+					)
+				},
 			}
 		},
 		push(body: any) {

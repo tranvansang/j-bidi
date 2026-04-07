@@ -239,9 +239,11 @@ export function makeBidiEndpointPlain({
 				...rest,
 			)
 			subs[id] = onData
-			return () => {
-				delete subs[id]
-				send({path: '/unsub', id})
+			return {
+				[Symbol.dispose]() {
+					delete subs[id]
+					send({path: '/unsub', id})
+				},
 			}
 		},
 		push(body: any, ...rest: any[]) {
