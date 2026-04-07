@@ -8,7 +8,7 @@ export function makeBidiEndpointBinary({
 	push,
 }: {
 	send(message: Uint8Array): void
-	subscribe?(body: any, onData: (data: Uint8Array) => void): void | (() => void)
+	subscribe?(body: any, onData: (data: Uint8Array) => void): void | Disposable
 	request?(body: any, signal: AbortSignal): Promise<Uint8Array>
 	push?(body: any): any
 }) {
@@ -19,10 +19,10 @@ export function makeBidiEndpointBinary({
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
 	// - connection closes
-	const unsubs = stack.adopt({} as Record<string, () => any>, unsubs => {
-		for (const [key, unsub] of Object.entries(unsubs)) {
-			unsub?.()
-			delete unsubs[key]
+	const allDisposable = stack.adopt({} as Record<string, Disposable | undefined>, allDisposable => {
+		for (const [key, disposable] of Object.entries(allDisposable)) {
+			disposable[Symbol.dispose]()
+			delete allDisposable[key]
 		}
 	})
 
@@ -68,7 +68,7 @@ export function makeBidiEndpointBinary({
 			else if (decoded.sub) {
 				const {id, body} = decoded.sub
 				if (!id) return
-				unsubs[id]?.()
+				allDisposable[id]?.[Symbol.dispose]()
 				let decodedBody
 				try {
 					decodedBody = protoDecodeJson(body)
@@ -82,7 +82,7 @@ export function makeBidiEndpointBinary({
 						bodyLength: body?.byteLength,
 					})
 				}
-				const sub = subscribe?.(decodedBody, data =>
+				const disposable = subscribe?.(decodedBody, data =>
 					send(
 						ProtoMessage.encode({
 							pub: {
@@ -92,12 +92,12 @@ export function makeBidiEndpointBinary({
 						}).finish(),
 					),
 				)
-				if (sub) unsubs[id] = sub
+				if (disposable) allDisposable[id] = disposable
 			} else if (decoded.unsub) {
 				const {id} = decoded.unsub
 				if (!id) return
-				unsubs[id]?.()
-				delete unsubs[id]
+				allDisposable[id]?.[Symbol.dispose]()
+				delete allDisposable[id]
 			} else if (decoded.pub) {
 				const {id, body} = decoded.pub
 				if (!id) return

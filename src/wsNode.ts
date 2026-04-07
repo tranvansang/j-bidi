@@ -3,7 +3,7 @@ import {type Atom, makeAtom} from 'j-atom'
 import {BidiEndpointBinary} from './bidiBinary.js'
 import {addBidiEndpointShared, connectWsShared} from './wsShared.js'
 
-export function addNodeWsHeartBeat(ws: WsWebSocket) {
+export function makeNodeWsHeartBeat(ws: WsWebSocket) {
 	let pongTimer: ReturnType<typeof setTimeout> | undefined // after ping, wait for pong
 	let pingTimer: ReturnType<typeof setTimeout> | undefined // to schedule next ping
 
@@ -15,9 +15,11 @@ export function addNodeWsHeartBeat(ws: WsWebSocket) {
 	})
 	ping()
 
-	return () => {
-		if (pingTimer) clearTimeout(pingTimer)
-		if (pongTimer) clearTimeout(pongTimer)
+	return {
+		[Symbol.dispose]() {
+			if (pingTimer) clearTimeout(pingTimer)
+			if (pongTimer) clearTimeout(pongTimer)
+		},
 	}
 
 	function ping() {
@@ -67,7 +69,7 @@ export function connectWsNode({
 	})
 }
 
-export function addBidiEndpointNode(
+export function makeBidiEndpointNode(
 	endpointAtom: Atom<BidiEndpointBinary | undefined>,
 	wsPath: string,
 	options?: {
@@ -80,12 +82,11 @@ export function addBidiEndpointNode(
 
 	const endpointAndWsAtom = makeAtom<{endpoint: BidiEndpointBinary; ws: WsWebSocket} | undefined>()
 	stack.use(addBidiEndpointShared(connectWsNode, endpointAndWsAtom, wsPath, options))
-	stack.adopt(
+	stack.use(
 		endpointAndWsAtom.sub(endpointAndWs => {
 			endpointAtom.value = endpointAndWs?.endpoint
-			if (endpointAndWs) return addNodeWsHeartBeat(endpointAndWs.ws)
+			if (endpointAndWs) return makeNodeWsHeartBeat(endpointAndWs.ws)
 		}),
-		x => x(),
 	)
 
 	return stack.move()

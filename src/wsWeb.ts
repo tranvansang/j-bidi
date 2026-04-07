@@ -15,7 +15,7 @@ function connectWsWeb({url, ...params}: {atom: Atom<WebSocket | undefined>; url:
 	})
 }
 
-export function addBidiEndpointWeb(
+export function makeBidiEndpointWeb(
 	endpointAtom: Atom<BidiEndpointBinary | undefined>,
 	wsPath: string,
 	options?: {
@@ -29,7 +29,7 @@ export function addBidiEndpointWeb(
 
 	stack.use(addBidiEndpointShared<WebSocket>(connectWsWeb, endpointAndWsAtom, wsPath, options))
 
-	stack.adopt(
+	stack.use(
 		endpointAndWsAtom.sub(endpointAndWs => {
 			endpointAtom.value = endpointAndWs?.endpoint
 			if (endpointAndWs) {
@@ -45,9 +45,11 @@ export function addBidiEndpointWeb(
 					pingTimer = setTimeout(ping, 30_000)
 				}
 				ping()
-				return () => {
-					if (pongTimer) clearTimeout(pongTimer)
-					if (pingTimer) clearTimeout(pingTimer)
+				return {
+					[Symbol.dispose]() {
+						if (pongTimer) clearTimeout(pongTimer)
+						if (pingTimer) clearTimeout(pingTimer)
+					},
 				}
 				function ping() {
 					pingTimer = undefined
@@ -59,7 +61,6 @@ export function addBidiEndpointWeb(
 				}
 			}
 		}),
-		x => x(),
 	)
 
 	return stack.move()

@@ -22,8 +22,8 @@
 		"typescript": "^6.0.2"
 	},
 	"dependencies": {
-		"j-atom": "^0.1.0",
-		"jrx": "^0.3.0-alpha.1",
+		"j-atom": "^0.2.0-alpha.1",
+		"jrx": "^0.3.0-alpha.2",
 		"protobufjs": "^8.0.0",
 		"ws": "^8.20.0"
 	}

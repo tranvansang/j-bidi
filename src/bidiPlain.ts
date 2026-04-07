@@ -45,7 +45,7 @@ export function makeBidiEndpointPlain({
 	push,
 }: {
 	send(message: SendPayload, ...rest: any[]): void
-	subscribe?(body: any, onData: (data: any) => void): void | (() => void)
+	subscribe?(body: any, onData: (data: any) => void): void | Disposable
 	request?(body: any, signal: AbortSignal): Promise<any>
 	push?(body: any): any
 }) {
@@ -56,10 +56,10 @@ export function makeBidiEndpointPlain({
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
 	// - connection closes
-	const unsubs = stack.adopt({} as Record<string, () => any>, unsubs => {
-		for (const [key, unsub] of Object.entries(unsubs)) {
-			unsub?.()
-			delete unsubs[key]
+	const allDisposable = stack.adopt({} as Record<string, Disposable | undefined>, allDisposable => {
+		for (const [key, disposable] of Object.entries(allDisposable)) {
+			disposable[Symbol.dispose]()
+			delete allDisposable[key]
 		}
 	})
 
@@ -92,23 +92,23 @@ export function makeBidiEndpointPlain({
 					{
 						const {id, body} = message
 						if (!id) return
-						unsubs[id]?.()
-						const sub = subscribe?.(body, data =>
+						allDisposable[id]?.[Symbol.dispose]()
+						const disposable = subscribe?.(body, data =>
 							send({
 								path: '/pub',
 								id,
 								body: data,
 							}),
 						)
-						if (sub) unsubs[id] = sub
+						if (disposable) allDisposable[id] = disposable
 					}
 					break
 				case '/unsub':
 					{
 						const {id} = message
 						if (!id) return
-						unsubs[id]?.()
-						delete unsubs[id]
+						allDisposable[id]?.[Symbol.dispose]()
+						delete allDisposable[id]
 					}
 					break
 				case '/pub':

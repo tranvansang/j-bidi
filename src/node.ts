@@ -1,1 +1,1 @@
-export {addBidiEndpointNode, addNodeWsHeartBeat, connectWsNode} from './wsNode.js'
+export {makeBidiEndpointNode, makeNodeWsHeartBeat, connectWsNode} from './wsNode.js'

@@ -48,7 +48,7 @@ export function connectWsShared<T extends WebSocket | WsWebSocket>(
 	)
 }
 
-export function addBidiEndpointShared<T extends WebSocket | WsWebSocket>(
+export function makeBidiEndpointShared<T extends WebSocket | WsWebSocket>(
 	connectWs: (params: {atom: Atom<T | undefined>; url: string; resetBackoff?(): void}) => Disposable & Promise<void>,
 	endpointAndWsAtom: Atom<{endpoint: BidiEndpointBinary; ws: T} | undefined>,
 	wsPath: string,
@@ -57,17 +57,17 @@ export function addBidiEndpointShared<T extends WebSocket | WsWebSocket>(
 		request,
 		push,
 	}: {
-		subscribe?(body: any, onData: (data: any) => void): void | (() => void)
+		subscribe?(body: any, onData: (data: any) => void): void | Disposable
 		request?(body: any, signal: AbortSignal): Promise<any>
 		push?(body: any): any
 	} = {},
 ) {
-	const stack = new DisposableStack()
+	using stack = new DisposableStack()
 
 	const wsAtom = makeAtom<T>()
 
 	// pipeline websocket connection to a bidirectional endpoint
-	stack.adopt(
+	stack.use(
 		wsAtom.sub(ws => {
 			if (!ws) return (endpointAndWsAtom.value = undefined)
 
@@ -111,10 +111,8 @@ export function addBidiEndpointShared<T extends WebSocket | WsWebSocket>(
 					signal: stack.adopt(new AbortController(), controller => controller.abort()).signal,
 				},
 			)
-			const moved = stack.move()
-			return moved.dispose.bind(moved)
+			return stack.move()
 		}),
-		x => x(),
 	)
 
 	// try connecting, until success, retry if disconnect, unless stack gets disposed
@@ -128,5 +126,5 @@ export function addBidiEndpointShared<T extends WebSocket | WsWebSocket>(
 		),
 	)
 
-	return stack
+	return stack.move()
 }
