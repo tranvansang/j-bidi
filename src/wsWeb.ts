@@ -1,6 +1,6 @@
 import {type Atom, makeAtom} from 'j-atom'
 import {type BidiEndpointBinary} from './bidiBinary.js'
-import {addBidiEndpointShared, connectWsShared} from './wsShared.js'
+import {makeBidiEndpointShared, connectWsShared} from './wsShared.js'
 
 function connectWsWeb({url, ...params}: {atom: Atom<WebSocket | undefined>; url: string; resetBackoff?(): void}) {
 	using stack = new DisposableStack()
@@ -19,7 +19,7 @@ export function makeBidiEndpointWeb(
 	endpointAtom: Atom<BidiEndpointBinary | undefined>,
 	wsPath: string,
 	options?: {
-		subscribe?(body: any, onData: (data: any) => void): void | (() => void)
+		subscribe?(body: any, onData: (data: any) => void): void | Disposable
 		request?(body: any, signal: AbortSignal): Promise<any>
 		push?(body: any): any
 	},
@@ -27,7 +27,7 @@ export function makeBidiEndpointWeb(
 	using stack = new DisposableStack()
 	const endpointAndWsAtom = makeAtom<{endpoint: BidiEndpointBinary; ws: WebSocket} | undefined>()
 
-	stack.use(addBidiEndpointShared<WebSocket>(connectWsWeb, endpointAndWsAtom, wsPath, options))
+	stack.use(makeBidiEndpointShared<WebSocket>(connectWsWeb, endpointAndWsAtom, wsPath, options))
 
 	stack.use(
 		endpointAndWsAtom.sub(endpointAndWs => {

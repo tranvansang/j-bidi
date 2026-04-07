@@ -56,7 +56,7 @@ export function makeBidiEndpointPlain({
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
 	// - connection closes
-	const allDisposable = stack.adopt({} as Record<string, Disposable | undefined>, allDisposable => {
+	const allDisposable = stack.adopt({} as Record<string, Disposable>, allDisposable => {
 		for (const [key, disposable] of Object.entries(allDisposable)) {
 			disposable[Symbol.dispose]()
 			delete allDisposable[key]
