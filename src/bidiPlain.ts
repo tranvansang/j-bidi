@@ -37,8 +37,8 @@ type SendPayload =
 			body?: string
 	  }
 
-export type BidiEndpointPlain = ReturnType<typeof makeBidiEndpointPlain>
-export function makeBidiEndpointPlain({
+export type BidiEndpointPlain = ReturnType<typeof createBidiEndpointPlain>
+export function createBidiEndpointPlain({
 	send,
 	subscribe,
 	request,

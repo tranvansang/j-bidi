@@ -1,7 +1,7 @@
 import {protoDecodeJson, protoEncodeJson, ProtoMessage} from './protobuf.js'
 
-export type BidiEndpointBinary = ReturnType<typeof makeBidiEndpointBinary>
-export function makeBidiEndpointBinary({
+export type BidiEndpointBinary = ReturnType<typeof createBidiEndpointBinary>
+export function createBidiEndpointBinary({
 	send,
 	subscribe,
 	request,

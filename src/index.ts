@@ -1,3 +1,3 @@
-export {type BidiEndpointBinary, makeBidiEndpointBinary} from './bidiBinary.js'
-export {type BidiEndpointPlain, makeBidiEndpointPlain} from './bidiPlain.js'
-export {makeBidiEndpointWeb} from './wsWeb.js'
+export {type BidiEndpointBinary, createBidiEndpointBinary} from './bidiBinary.js'
+export {type BidiEndpointPlain, createBidiEndpointPlain} from './bidiPlain.js'
+export {createBidiEndpointWeb} from './wsWeb.js'
