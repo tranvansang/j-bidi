@@ -1,7 +1,6 @@
 import {Atom, makeAtom} from 'j-atom'
 import {type WebSocket as WsWebSocket} from 'ws'
 import {BidiEndpointBinary, createBidiEndpointBinary} from './bidiBinary.js'
-import {retry} from 'jrx'
 
 export function connectWsShared<T extends WebSocket | WsWebSocket>(
 	ws: T,
@@ -49,9 +48,8 @@ export function connectWsShared<T extends WebSocket | WsWebSocket>(
 }
 
 export function createBidiEndpointShared<T extends WebSocket | WsWebSocket>(
-	connectWs: (params: {atom: Atom<T | undefined>; url: string; resetBackoff?(): void}) => Disposable & Promise<void>,
+	ws: T | undefined,
 	endpointAndWsAtom: Atom<{endpoint: BidiEndpointBinary; ws: T} | undefined>,
-	wsPath: string,
 	{
 		subscribe,
 		request,
@@ -62,69 +60,48 @@ export function createBidiEndpointShared<T extends WebSocket | WsWebSocket>(
 		push?(body: any): any
 	} = {},
 ) {
-	using stack = new DisposableStack()
-
-	const wsAtom = makeAtom<T>()
-
 	// pipeline websocket connection to a bidirectional endpoint
-	stack.use(
-		wsAtom.sub(ws => {
-			if (!ws) return (endpointAndWsAtom.value = undefined)
+	if (!ws) return (endpointAndWsAtom.value = undefined)
 
-			using stack = new DisposableStack()
-			const endpoint = stack.use(
-				createBidiEndpointBinary({
-					send(message) {
-						// when connected:
-						// - topic atom subscribes to dataSourceAtom, which subscribes to endpointAndWsAtom, which subscribes to wsAtom
-						// - the subscription registers an unsubscription hook (*1)
-						// when disconnected:
-						// - ws's state becomes CLOSED
-						// -> wsAtom.value becomes undefined
-						// -> endpointAndWsAtom.value becomes undefined
-						// -> dataSourceAtom.value becomes undefined
-						// -> topic atom triggers unsubscription hook (*1)
-						// -> the unsubscription hook is "bidirectional endpoint sends an /unsub message". However, the websocket already CLOSED, so we need to check readyState before sending.
-						if (ws.readyState === WebSocket.OPEN) ws.send(message as Uint8Array<ArrayBuffer>)
-						else console.warn('ws is closed, cannot send message wShared', message.length)
-					},
-					subscribe,
-					request,
-					push,
-				}),
-			)
-
-			endpointAndWsAtom.value = {endpoint, ws}
-
-			ws.addEventListener(
-				'message',
-				({data}: any) => {
-					// nodejs's Buffer extends Uint8Array
-					if (data instanceof Uint8Array) return endpoint.send(data)
-
-					// Web's WebSocket with binaryType = 'arraybuffer'
-					if (data instanceof ArrayBuffer) return endpoint.send(new Uint8Array(data))
-
-					console.warn('wsShared received non-binary data, expected Uint8Array or ArrayBuffer', typeof data)
-				},
-				{
-					signal: stack.adopt(new AbortController(), controller => controller.abort()).signal,
-				},
-			)
-			return stack.move()
+	using stack = new DisposableStack()
+	const endpoint = stack.use(
+		createBidiEndpointBinary({
+			send(message) {
+				// when connected:
+				// - topic atom subscribes to dataSourceAtom, which subscribes to endpointAndWsAtom, which subscribes to wsAtom
+				// - the subscription registers an unsubscription hook (*1)
+				// when disconnected:
+				// - ws's state becomes CLOSED
+				// -> wsAtom.value becomes undefined
+				// -> endpointAndWsAtom.value becomes undefined
+				// -> dataSourceAtom.value becomes undefined
+				// -> topic atom triggers unsubscription hook (*1)
+				// -> the unsubscription hook is "bidirectional endpoint sends an /unsub message". However, the websocket already CLOSED, so we need to check readyState before sending.
+				if (ws.readyState === WebSocket.OPEN) ws.send(message as Uint8Array<ArrayBuffer>)
+				else console.warn('ws is closed, cannot send message wShared', message.length)
+			},
+			subscribe,
+			request,
+			push,
 		}),
 	)
 
-	// try connecting, until success, retry if disconnect, unless stack gets disposed
-	void stack.use(
-		retry(({resetBackoff}) =>
-			connectWs({
-				atom: wsAtom,
-				url: wsPath,
-				resetBackoff,
-			}),
-		),
-	)
+	endpointAndWsAtom.value = {endpoint, ws}
 
+	ws.addEventListener(
+		'message',
+		({data}: any) => {
+			// nodejs's Buffer extends Uint8Array
+			if (data instanceof Uint8Array) return endpoint.send(data)
+
+			// Web's WebSocket with binaryType = 'arraybuffer'
+			if (data instanceof ArrayBuffer) return endpoint.send(new Uint8Array(data))
+
+			console.warn('wsShared received non-binary data, expected Uint8Array or ArrayBuffer', typeof data)
+		},
+		{
+			signal: stack.adopt(new AbortController(), controller => controller.abort()).signal,
+		},
+	)
 	return stack.move()
 }

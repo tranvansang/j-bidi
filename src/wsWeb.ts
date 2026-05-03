@@ -1,6 +1,7 @@
 import {type Atom, makeAtom} from 'j-atom'
 import {type BidiEndpointBinary} from './bidiBinary.js'
-import {createBidiEndpointShared, connectWsShared} from './wsShared.js'
+import {connectWsShared, createBidiEndpointShared} from './wsShared.js'
+import {retry} from "jrx";
 
 function connectWsWeb({url, ...params}: {atom: Atom<WebSocket | undefined>; url: string; resetBackoff?(): void}) {
 	using stack = new DisposableStack()
@@ -25,9 +26,21 @@ export function createBidiEndpointWeb(
 	},
 ) {
 	using stack = new DisposableStack()
-	const endpointAndWsAtom = makeAtom<{endpoint: BidiEndpointBinary; ws: WebSocket} | undefined>()
 
-	stack.use(createBidiEndpointShared<WebSocket>(connectWsWeb, endpointAndWsAtom, wsPath, options))
+	const wsAtom = makeAtom<WebSocket | undefined>()
+	const endpointAndWsAtom = makeAtom<{endpoint: BidiEndpointBinary; ws: WebSocket} | undefined>()
+	stack.use(wsAtom.sub(ws => createBidiEndpointShared<WebSocket>(ws, endpointAndWsAtom, options)))
+
+	// try connecting, until success, retry if disconnect, unless stack gets disposed
+	void stack.use(
+		retry(({resetBackoff}) =>
+			connectWsWeb({
+				atom: wsAtom,
+				url: wsPath,
+				resetBackoff,
+			}),
+		),
+	)
 
 	stack.use(
 		endpointAndWsAtom.sub(endpointAndWs => {
