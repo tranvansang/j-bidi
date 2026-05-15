@@ -1,4 +1,4 @@
-import {Atom, makeAtom} from 'j-atom'
+import {Atom} from 'j-atom'
 import {type WebSocket as WsWebSocket} from 'ws'
 import {BidiEndpointBinary, createBidiEndpointBinary} from './bidiBinary.js'
 
