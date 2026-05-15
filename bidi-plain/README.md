@@ -1,8 +1,10 @@
-# j-bidi
+# bidi-plain
 
-Bidirectional messaging library supporting request-response, subscriptions, and push notifications.
-Works with both binary and plain JSON encoding.
-Ships with browser WebSocket and Node.js `ws` backends, or bring your own transport.
+Transport-agnostic bidirectional messaging — request-response, subscriptions, and push — over plain JSON.
+
+Bring your own transport (WebSocket, Web Worker, `postMessage`, MessageChannel, etc). The endpoint just hands you serializable messages to send and consumes messages you feed back in.
+
+For the binary (protobuf) encoding and bundled WebSocket (browser + Node `ws`) backends with auto-reconnect and heartbeat, see [`j-bidi`](../legacy).
 
 ## Requirements
 
@@ -14,7 +16,7 @@ This library uses the [Explicit Resource Management](https://github.com/tc39/pro
 ## Install
 
 ```bash
-npm i j-bidi
+npm i bidi-plain
 ```
 
 ## Features
@@ -22,111 +24,14 @@ npm i j-bidi
 - **Request-Response** — RPC-style calls with timeout and AbortSignal support
 - **Subscriptions** — pub/sub pattern with automatic cleanup
 - **Push** — fire-and-forget messages
-- **Ping/Pong** — built-in heartbeat (30s interval, 5s timeout)
-- **Auto-reconnect** — retry with backoff on disconnect
-- **Dual encoding** — plain JSON or binary
-- **Cross-platform** — browser (WebSocket API) and Node.js (`ws`)
+- **Ping/Pong** — protocol-level, wire it to whatever heartbeat you need
+- **Transport-agnostic** — works over any send/receive pair
+- **Plain JSON** — messages are plain objects, serialize however you like
 
 ## Usage
 
-### Browser
-
 ```ts
-import {type BidiEndpointBinary, createBidiEndpointWeb} from 'j-bidi'
-import {makeAtom} from 'j-atom'
-
-const endpointAtom = makeAtom<BidiEndpointBinary | undefined>()
-
-// Connect with auto-reconnect and heartbeat
-using connection = createBidiEndpointWeb(endpointAtom, 'wss://example.com/ws', {
-	subscribe(body, onData) {
-		if (body?.path === '/topic') {
-			return dataAtom.sub(data => onData(encode(data)))
-		}
-	},
-	async request(body, signal) {
-		if (body?.path === '/set-config') return updateConfig(body)
-	},
-	push(body) {
-		console.log('received push:', body)
-	},
-})
-
-// Use the endpoint
-const endpoint = endpointAtom.value
-
-// Subscribe to server data
-using unsub = endpoint?.subscribe({path: '/topic', name: '/events'}, data => {
-	console.log('event:', data)
-})
-
-// RPC call with timeout and abort
-const result = await endpoint?.request(
-	{path: '/service', name: '/query', body: {id: 123}},
-	{timeout: 30_000},
-)
-
-// Fire-and-forget
-endpoint?.push({path: '/notify', body: {event: 'click'}})
-```
-
-### Node.js
-
-```ts
-import {createBidiEndpointNode} from 'j-bidi/node'
-import {makeAtom} from 'j-atom'
-
-const endpointAtom = makeAtom<BidiEndpointBinary | undefined>()
-
-using connection = createBidiEndpointNode(endpointAtom, 'wss://example.com/ws', {
-	subscribe(body, onData) {
-		if (body?.path === '/topic') {
-			return sensorAtom.sub(data => onData(encode(data)))
-		}
-	},
-})
-```
-
-### Server-side WebSocket handling
-
-```ts
-import {createBidiEndpointBinary} from 'j-bidi'
-import {createNodeWsHeartBeat} from 'j-bidi/node'
-
-wsServer.handleUpgrade(req, socket, head, ws => {
-	const stack = new DisposableStack()
-	stack.use(createNodeWsHeartBeat(ws))
-
-	const endpoint = stack.use(createBidiEndpointBinary({
-		send(message) {
-			if (ws.readyState === WebSocket.OPEN) ws.send(message)
-		},
-		subscribe(body, onData) {
-			if (body?.path === '/topic') {
-				return dataAtom.sub(data => onData(encode(data)))
-			}
-		},
-		async request(body, signal) {
-			switch (body?.path) {
-				case '/set-rtc':
-					return handleSetRtc(body)
-			}
-		},
-	}))
-
-	ws.on('message', data => {
-		if (data instanceof Uint8Array) endpoint.send(data)
-	})
-	ws.on('close', () => stack.dispose())
-})
-```
-
-### Custom transport (plain JSON)
-
-Use `createBidiEndpointPlain` with any transport — Web Workers, postMessage, etc:
-
-```ts
-import {createBidiEndpointPlain} from 'j-bidi'
+import {createBidiEndpointPlain} from 'bidi-plain'
 
 // Example: bidirectional messaging over a Web Worker
 using endpoint = createBidiEndpointPlain({
@@ -138,6 +43,9 @@ using endpoint = createBidiEndpointPlain({
 			return atom.sub(v => onData(v))
 		}
 	},
+	async request(body, signal) {
+		if (body?.path === '/set-config') return updateConfig(body)
+	},
 	push(body) {
 		handlePush(body)
 	},
@@ -145,6 +53,31 @@ using endpoint = createBidiEndpointPlain({
 
 // Feed incoming messages from the other side
 self.onmessage = ({data}) => endpoint.send(data)
+
+// Subscribe to peer data
+using unsub = endpoint.subscribe({path: '/topic', name: '/events'}, data => {
+	console.log('event:', data)
+})
+
+// RPC call with timeout and abort
+const result = await endpoint.request(
+	{path: '/service', name: '/query', body: {id: 123}},
+	{timeout: 30_000},
+)
+
+// Fire-and-forget
+endpoint.push({path: '/notify', body: {event: 'click'}})
+```
+
+### Heartbeat
+
+`/ping` is answered with `/pong` automatically. To run your own heartbeat, send `/ping` on an interval and listen for `/pong` via the setter:
+
+```ts
+endpoint.pong = () => {
+	// peer is alive
+}
+setInterval(() => endpoint.send({path: '/ping'}), 30_000)
 ```
 
 ## Message Protocol
@@ -164,9 +97,7 @@ The protocol uses 8 message types:
 
 ## API
 
-### `j-bidi`
-
-#### `createBidiEndpointPlain(options)` / `createBidiEndpointBinary(options)`
+### `createBidiEndpointPlain(options)`
 
 Create an endpoint. Options:
 
@@ -178,28 +109,11 @@ Create an endpoint. Options:
 Returns a `Disposable` endpoint with:
 
 - `send(message)` — feed incoming messages from the peer
-- `request(body, options?)` — send a request (`options: {timeout?, signal?}`)
+- `request(body, options?)` — send a request (`options: {timeout?, signal?}`, default timeout 10s)
 - `subscribe(body, onData)` — subscribe to a topic, returns `Disposable`
 - `push(body)` — send a push message
+- `pong` (setter) — callback invoked when a `/pong` is received from the peer
 - `[Symbol.dispose]()` — cleanup (use with `using`)
-
-#### `createBidiEndpointWeb(endpointAtom, wsUrl, options?)`
-
-Connect via browser WebSocket with auto-reconnect and heartbeat. Returns a `DisposableStack`.
-
-### `j-bidi/node`
-
-#### `createBidiEndpointNode(endpointAtom, wsUrl, options?)`
-
-Connect via Node.js `ws` with auto-reconnect and heartbeat. Returns a `DisposableStack`.
-
-#### `connectWsNode(options)`
-
-Low-level Node.js WebSocket connection. Returns a `Disposable & Promise<void>`. Options: `url`, `atom`, `resetBackoff?`, `disableDeflate?`.
-
-#### `createNodeWsHeartBeat(ws)`
-
-Add ping/pong heartbeat to a Node.js WebSocket. Returns a `Disposable` (use with `stack.use()` or `using`).
 
 ## License
 

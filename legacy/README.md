@@ -1,8 +1,9 @@
 # j-bidi
 
-Bidirectional messaging library supporting request-response, subscriptions, and push notifications.
-Works with both binary and plain JSON encoding.
-Ships with browser WebSocket and Node.js `ws` backends, or bring your own transport.
+Bidirectional messaging library supporting request-response, subscriptions, and push notifications, encoded as binary (protobuf).
+Ships with browser WebSocket and Node.js `ws` backends, with auto-reconnect and heartbeat.
+
+If you only need plain JSON over your own transport (no protobuf, no bundled WebSocket), use [`bidi-plain`](../bidi-plain) instead — it's the transport-agnostic core.
 
 ## Requirements
 
@@ -24,7 +25,7 @@ npm i j-bidi
 - **Push** — fire-and-forget messages
 - **Ping/Pong** — built-in heartbeat (30s interval, 5s timeout)
 - **Auto-reconnect** — retry with backoff on disconnect
-- **Dual encoding** — plain JSON or binary
+- **Binary encoding** — compact protobuf wire format
 - **Cross-platform** — browser (WebSocket API) and Node.js (`ws`)
 
 ## Usage
@@ -123,29 +124,7 @@ wsServer.handleUpgrade(req, socket, head, ws => {
 
 ### Custom transport (plain JSON)
 
-Use `createBidiEndpointPlain` with any transport — Web Workers, postMessage, etc:
-
-```ts
-import {createBidiEndpointPlain} from 'j-bidi'
-
-// Example: bidirectional messaging over a Web Worker
-using endpoint = createBidiEndpointPlain({
-	send(message) {
-		postMessage(message)
-	},
-	subscribe(body, onData) {
-		if (body?.path === '/atom') {
-			return atom.sub(v => onData(v))
-		}
-	},
-	push(body) {
-		handlePush(body)
-	},
-})
-
-// Feed incoming messages from the other side
-self.onmessage = ({data}) => endpoint.send(data)
-```
+For non-WebSocket transports (Web Workers, `postMessage`, MessageChannel, etc.) using plain JSON, see the sibling [`bidi-plain`](../bidi-plain) package.
 
 ## Message Protocol
 
@@ -166,9 +145,9 @@ The protocol uses 8 message types:
 
 ### `j-bidi`
 
-#### `createBidiEndpointPlain(options)` / `createBidiEndpointBinary(options)`
+#### `createBidiEndpointBinary(options)`
 
-Create an endpoint. Options:
+Create a protobuf-encoded endpoint. Options:
 
 - `send(message)` — transport send function (required)
 - `request(body, signal)` — handler for incoming requests
