@@ -1,5 +1,5 @@
 {
-	"name": "j-bidi",
+	"name": "bidi-plain",
 	"version": "0.0.2-alpha.7",
 	"scripts": {
 		"prepublishOnly": "npx tsc"
@@ -8,22 +8,16 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
-		},
-		"./node": {
-			"types": "./dist/node.d.ts",
-			"import": "./dist/node.js"
 		}
 	},
 	"files": [
-		"dist"
+		"index.js",
+		"index.d.ts"
 	],
 	"devDependencies": {
-		"@types/ws": "^8.18.1",
 		"typescript": "^6.0.2"
 	},
 	"dependencies": {
-		"j-atom": "0.2.0-alpha.2",
-		"protobufjs": "^8.0.0",
-		"ws": "^8.20.0"
+		"j-atom": "0.2.0-alpha.2"
 	}
 }
