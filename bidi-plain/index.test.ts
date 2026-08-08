@@ -930,6 +930,26 @@ describe('dispose', () => {
 		strictEqual(sent[0].message.body, 'before')
 	})
 
+	it('already counts as disposed while its own cleanup runs', () => {
+		const sent: Frame[] = []
+		const endpoint = createBidiEndpointPlain({
+			send(message, ...rest) {
+				sent.push({message, rest})
+			},
+			subscribe(body, onData) {
+				return {[Symbol.dispose]() {
+					onData('goodbye')
+				}}
+			},
+		})
+
+		endpoint.send({path: '/sub', id: 's'})
+		sent.length = 0
+		endpoint[Symbol.dispose]()
+
+		strictEqual(sent.length, 0, 'cleanup that talks back must find the endpoint already closed')
+	})
+
 	it('does not abort a request it gave up on while disposing', async () => {
 		const sent: Frame[] = []
 		const endpoint = createBidiEndpointPlain({send(message, ...rest) {

@@ -56,8 +56,6 @@ export function createBidiEndpointPlain({
 	using stack = new DisposableStack()
 
 	let pong: (() => void) | undefined
-	let disposed = false
-	stack.defer(() => void (disposed = true))
 
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
@@ -93,6 +91,9 @@ export function createBidiEndpointPlain({
 			delete reqs[key]
 		}
 	})
+
+	let disposed = false
+	stack.defer(() => void (disposed = true))
 
 	const moved = stack.move()
 	return {
