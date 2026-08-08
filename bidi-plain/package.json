@@ -3,7 +3,8 @@
 	"version": "0.0.2",
 	"type": "module",
 	"scripts": {
-		"prepublishOnly": "npx tsc"
+		"prepublishOnly": "npx tsc",
+		"test": "npx tsc && node --test"
 	},
 	"exports": {
 		".": {
