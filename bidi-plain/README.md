@@ -2,16 +2,20 @@
 
 Transport-agnostic bidirectional messaging — request-response, subscriptions, and push — over plain JSON.
 
-Bring your own transport (WebSocket, Web Worker, `postMessage`, MessageChannel, etc). The endpoint just hands you serializable messages to send and consumes messages you feed back in.
+Bring your own transport (WebSocket, Web Worker, `postMessage`, MessageChannel, etc). The endpoint just hands you
+serializable messages to send and consumes messages you feed back in.
 
-For the binary (protobuf) encoding and bundled WebSocket (browser + Node `ws`) backends with auto-reconnect and heartbeat, see [`j-bidi`](../legacy).
+For the binary (protobuf) encoding and bundled WebSocket (browser + Node `ws`) backends with auto-reconnect and
+heartbeat, see [`j-bidi`](../legacy).
 
 ## Requirements
 
-This library uses the [Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management) API (`using`, `DisposableStack`). Your environment needs:
+This library uses the [Explicit Resource Management](https://github.com/tc39/proposal-explicit-resource-management) API
+(`using`, `DisposableStack`). Your environment needs:
 
 - A **runtime polyfill** (e.g. `core-js`, Node.js ≥ 22, or a browser with native support)
-- A **transpiler** that supports the `using` keyword (TypeScript ≥ 5.2 or Babel with `@babel/plugin-proposal-explicit-resource-management`)
+- A **transpiler** that supports the `using` keyword (TypeScript ≥ 5.2 or Babel with
+  `@babel/plugin-proposal-explicit-resource-management`)
 
 ## Install
 
@@ -71,7 +75,8 @@ endpoint.push({path: '/notify', body: {event: 'click'}})
 
 ### Heartbeat
 
-`/ping` is answered with `/pong` automatically. To run your own heartbeat, send `/ping` on an interval and listen for `/pong` via the setter:
+`/ping` is answered with `/pong` automatically. To run your own heartbeat, send `/ping` on an interval and listen for
+`/pong` via the setter:
 
 ```ts
 endpoint.pong = () => {
@@ -82,18 +87,19 @@ setInterval(() => endpoint.send({path: '/ping'}), 30_000)
 
 ## Message Protocol
 
-The protocol uses 8 message types:
+The protocol uses 9 message types:
 
-| Path     | Purpose               | Fields                           |
-|----------|-----------------------|----------------------------------|
-| `/ping`  | Heartbeat request     | —                                |
-| `/pong`  | Heartbeat response    | —                                |
-| `/req`   | Request               | `id`, `body?`                    |
-| `/res`   | Response              | `id`, `body?`, `error?`, `code?` |
-| `/sub`   | Subscribe             | `id`, `body?`                    |
-| `/unsub` | Unsubscribe           | `id`                             |
-| `/pub`   | Publish to subscriber | `id`, `body?`                    |
-| `/push`  | Push notification     | `id`, `body`                     |
+| Path     | Purpose                  | Fields                           |
+|----------|--------------------------|----------------------------------|
+| `/ping`  | Heartbeat request        | —                                |
+| `/pong`  | Heartbeat response       | —                                |
+| `/req`   | Request                  | `id`, `body?`                    |
+| `/res`   | Response                 | `id`, `body?`, `error?`, `code?` |
+| `/abort` | Caller gave up on `/req` | `id`                             |
+| `/sub`   | Subscribe                | `id`, `body?`                    |
+| `/unsub` | Unsubscribe              | `id`                             |
+| `/pub`   | Publish to subscriber    | `id`, `body?`                    |
+| `/push`  | Push notification        | `id`, `body`                     |
 
 ## API
 

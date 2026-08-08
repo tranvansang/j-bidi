@@ -32,6 +32,10 @@ type SendPayload =
 			code?: string
 	  }
 	| {
+			path: '/abort'
+			id: string
+	  }
+	| {
 			path: '/push'
 			id: string
 			body?: string
@@ -74,15 +78,12 @@ export function createBidiEndpointPlain({
 
 	// requests we sent to partner and are waiting for response
 	// need to settle them when connection closes, else callers hang until timeout (forever if timeout is 0)
-	const defers = stack.adopt(
-		Object.create(null) as Record<string, PromiseWithResolvers<any>>,
-		defers => {
-			for (const [key, defer] of Object.entries(defers)) {
-				defer.reject(new Error('endpoint disposed'))
-				delete defers[key]
-			}
-		},
-	)
+	const defers = stack.adopt(Object.create(null) as Record<string, PromiseWithResolvers<any>>, defers => {
+		for (const [key, defer] of Object.entries(defers)) {
+			defer.reject(new Error('endpoint disposed'))
+			delete defers[key]
+		}
+	})
 
 	// requests list we need to response when partner sends us
 	// need to abort local processes if the partner sends but connection closes before finishing processing
@@ -109,13 +110,14 @@ export function createBidiEndpointPlain({
 						const {id, body} = message
 						if (!id) return
 						allDisposable[id]?.[Symbol.dispose]()
-						const disposable = subscribe?.(body, data =>
+						const disposable = subscribe?.(body, data => {
+							if (disposed) return
 							send({
 								path: '/pub',
 								id,
 								body: data,
-							}),
-						)
+							})
+						})
 						if (disposable) allDisposable[id] = disposable
 					}
 					break
@@ -156,12 +158,15 @@ export function createBidiEndpointPlain({
 							reqs[id] = abortController.abort.bind(abortController)
 							void (async () => {
 								try {
+									const responseBody = await request(body, abortController.signal)
+									if (disposed) return
 									send({
 										path: '/res',
 										id,
-										body: await request(body, abortController.signal),
+										body: responseBody,
 									})
 								} catch (e) {
+									if (disposed) return
 									send({
 										path: '/res',
 										id,
@@ -184,6 +189,14 @@ export function createBidiEndpointPlain({
 							if (error || code) defer.reject(new Error(error || 'unknown error', {cause: {code}}))
 							else defer.resolve(body)
 						}
+					}
+					break
+				case '/abort':
+					{
+						const {id} = message
+						if (!id) return
+						reqs[id]?.()
+						delete reqs[id]
 					}
 					break
 				case '/push':
@@ -224,13 +237,13 @@ export function createBidiEndpointPlain({
 			const abortError = new DOMException('Aborted', 'AbortError')
 			if (signal?.aborted) defer.reject(abortError)
 			else {
-				signal?.addEventListener('abort', () => defer.reject(abortError), {
+				signal?.addEventListener('abort', () => giveUp(abortError), {
 					signal: stack.adopt(new AbortController(), ab => ab.abort()).signal,
 				})
 
 				if (timeout)
 					stack.adopt(
-						setTimeout(() => defer.reject(new Error('timeout')), timeout),
+						setTimeout(() => giveUp(new Error('timeout')), timeout),
 						clearTimeout,
 					)
 
@@ -245,6 +258,11 @@ export function createBidiEndpointPlain({
 			}
 
 			return await defer.promise
+
+			function giveUp(reason: Error) {
+				defer.reject(reason)
+				if (!disposed) send({path: '/abort', id}, ...rest)
+			}
 		},
 		subscribe<T>(this: void, body: any, onData: (data: T) => void, ...rest: any[]) {
 			const id = crypto.randomUUID()

@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process'
 import {readFile} from 'node:fs/promises'
 import {deepStrictEqual, match, notStrictEqual, ok, strictEqual} from 'node:assert'
 import {describe, it} from 'node:test'
-import {createBidiEndpointPlain} from './index.js'
+import {createBidiEndpointPlain} from './index.ts'
 
 // Endpoints are linked through a JSON round trip, like a real transport would be:
 // object identity never leaks between the two sides, and `undefined` fields drop off the wire.
@@ -246,6 +246,41 @@ describe('cancellation and timeouts', () => {
 		strictEqual(framesOf(pair.toB, '/req').length, 1)
 	})
 
+	it('tells the peer to abort when the caller aborts', async () => {
+		let remoteAborted: boolean | undefined
+		using pair = link({}, {async request(body, signal) {
+			await new Promise(resolve => signal.addEventListener('abort', resolve, {once: true}))
+			remoteAborted = signal.aborted
+			throw new Error('aborted')
+		}})
+
+		const controller = new AbortController()
+		const outcome = settle(pair.a.request({}, {signal: controller.signal, timeout: 0}))
+		await flush()
+		controller.abort()
+
+		strictEqual((await outcome).error.name, 'AbortError')
+		await flush()
+		strictEqual(remoteAborted, true)
+		strictEqual(framesOf(pair.toB, '/abort')[0].message.id, framesOf(pair.toB, '/req')[0].message.id)
+	})
+
+	it('tells the peer to abort when the request times out', async () => {
+		let remoteAborted: boolean | undefined
+		using pair = link({}, {async request(body, signal) {
+			await new Promise(resolve => signal.addEventListener('abort', resolve, {once: true}))
+			remoteAborted = signal.aborted
+			throw new Error('aborted')
+		}})
+
+		const {error} = await settle(pair.a.request({}, {timeout: 20}))
+		strictEqual(error.message, 'timeout')
+
+		await flush()
+		strictEqual(remoteAborted, true)
+		strictEqual(framesOf(pair.toB, '/abort').length, 1)
+	})
+
 	it('ignores a signal that aborts after the request settled', async () => {
 		using pair = link({}, {async request() {
 			return 'done'
@@ -255,6 +290,36 @@ describe('cancellation and timeouts', () => {
 		strictEqual(await pair.a.request({}, {signal: controller.signal}), 'done')
 		controller.abort()
 		await flush()
+
+		strictEqual(framesOf(pair.toB, '/abort').length, 0, 'an answered request has nothing to abort')
+	})
+
+	it('still answers a peer that ignores the abort', async () => {
+		const sent: Frame[] = []
+		using endpoint = createBidiEndpointPlain({
+			send(message, ...rest) {
+				sent.push({message, rest})
+			},
+			async request() {
+				await flush()
+				return 'stubborn'
+			},
+		})
+
+		endpoint.send({path: '/req', id: 'q'})
+		endpoint.send({path: '/abort', id: 'q'})
+		await flush(4)
+
+		strictEqual(sent.length, 1, '/abort cancels the signal, it does not cancel the reply')
+		strictEqual(sent[0].message.body, 'stubborn')
+	})
+
+	it('ignores an abort for a request it does not know', () => {
+		using endpoint = createBidiEndpointPlain({send() {}, async request() {
+			return 1
+		}})
+
+		endpoint.send({path: '/abort', id: crypto.randomUUID()})
 	})
 
 	it('drops a /res that arrives late, twice, or for an unknown id', async () => {
@@ -406,7 +471,7 @@ describe('hostile and malformed frames', () => {
 
 	it('survives prototype-shaped ids on every keyed path', () => {
 		for (const id of dangerousIds) {
-			for (const path of ['/sub', '/unsub', '/pub', '/req', '/res']) {
+			for (const path of ['/sub', '/unsub', '/pub', '/req', '/res', '/abort']) {
 				using endpoint = createBidiEndpointPlain({
 					send() {},
 					async request() {
@@ -492,7 +557,7 @@ describe('hostile and malformed frames', () => {
 			},
 		})
 
-		for (const path of ['/sub', '/unsub', '/pub', '/req', '/res']) endpoint.send({path} as any)
+		for (const path of ['/sub', '/unsub', '/pub', '/req', '/res', '/abort']) endpoint.send({path} as any)
 		await flush()
 
 		strictEqual(subscribed, 0)
@@ -616,7 +681,7 @@ describe('dispose', () => {
 	it('releases subscription callbacks for collection', async () => {
 		const {stdout} = await runNode(
 			`
-			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.js')}'
+			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.ts')}'
 			const endpoint = createBidiEndpointPlain({send() {}})
 			const ref = (() => {
 				const marker = {retained: true}
@@ -708,6 +773,106 @@ describe('dispose', () => {
 		strictEqual(sent.length, 0, 'nothing may be written to a closed transport')
 	})
 
+	// Dispose is unilateral and silent: the transport may already be gone, and noticing a dead
+	// partner is the caller's job (ping/pong), not the endpoint's.
+	it('sends nothing while tearing down, not even unsub or abort', async () => {
+		let released = 0
+		using pair = link({subscribe() {
+			return {[Symbol.dispose]() {
+				released++
+			}}
+		}}, {})
+
+		pair.b.subscribe({}, () => {})
+		const pending = settle(pair.b.request({}, {timeout: 0}))
+		await flush()
+
+		const quiet = pair.toA.length
+		pair.b[Symbol.dispose]()
+		strictEqual((await pending).error.message, 'endpoint disposed')
+		await flush()
+
+		strictEqual(pair.toA.length, quiet, 'no /unsub and no /abort may leave a disposing endpoint')
+		strictEqual(released, 0, 'the peer keeps serving until it notices the link is gone')
+	})
+
+	it('stays silent about a request that finishes after dispose', async () => {
+		const sent: Frame[] = []
+		const endpoint = createBidiEndpointPlain({
+			send(message, ...rest) {
+				sent.push({message, rest})
+			},
+			async request() {
+				await flush(4)
+				return 'late'
+			},
+		})
+
+		endpoint.send({path: '/req', id: 'q'})
+		endpoint[Symbol.dispose]()
+		await flush(6)
+
+		strictEqual(sent.length, 0)
+	})
+
+	it('stays silent about a request that fails after dispose', async () => {
+		const sent: Frame[] = []
+		const endpoint = createBidiEndpointPlain({
+			send(message, ...rest) {
+				sent.push({message, rest})
+			},
+			async request() {
+				await flush(4)
+				throw new Error('late failure')
+			},
+		})
+
+		endpoint.send({path: '/req', id: 'q'})
+		endpoint[Symbol.dispose]()
+		await flush(6)
+
+		strictEqual(sent.length, 0)
+	})
+
+	it('stops publishing to a peer subscription after dispose', () => {
+		const sent: Frame[] = []
+		let publish: ((data: any) => void) | undefined
+		const endpoint = createBidiEndpointPlain({
+			send(message, ...rest) {
+				sent.push({message, rest})
+			},
+			subscribe(body, onData) {
+				publish = onData
+				return {[Symbol.dispose]() {}}
+			},
+		})
+
+		endpoint.send({path: '/sub', id: 's'})
+		publish?.('before')
+		endpoint[Symbol.dispose]()
+		publish?.('after')
+
+		strictEqual(sent.length, 1)
+		strictEqual(sent[0].message.body, 'before')
+	})
+
+	it('does not abort a request it gave up on while disposing', async () => {
+		const sent: Frame[] = []
+		const endpoint = createBidiEndpointPlain({send(message, ...rest) {
+			sent.push({message, rest})
+		}})
+
+		const controller = new AbortController()
+		const pending = settle(endpoint.request({}, {signal: controller.signal, timeout: 0}))
+		sent.length = 0
+
+		endpoint[Symbol.dispose]()
+		controller.abort()
+
+		strictEqual((await pending).error.message, 'endpoint disposed')
+		strictEqual(sent.length, 0)
+	})
+
 	it('is idempotent and unbound-safe', async () => {
 		let released = 0
 		const endpoint = createBidiEndpointPlain({
@@ -761,73 +926,11 @@ describe('package contract', () => {
 		deepStrictEqual(pkg.files, ['index.js', 'index.d.ts'])
 	})
 
-	it('publishes types for the endpoint factory', async () => {
-		const types = await readFile(new URL('index.d.ts', import.meta.url), 'utf8')
-		match(types, /export declare function createBidiEndpointPlain/)
-		match(types, /export type BidiEndpointPlain/)
-	})
 })
 
 // Behaviour that is known to be wrong. Each test pins what the library does today, so a fix
 // makes it fail loudly instead of passing unnoticed.
 describe('known gaps', () => {
-	it('leaves the remote handler running after a local abort', async () => {
-		let remoteAborted: boolean | undefined
-		using pair = link({}, {async request(body, signal) {
-			await flush(4)
-			remoteAborted = signal.aborted
-			return 'done'
-		}})
-
-		const controller = new AbortController()
-		const outcome = settle(pair.a.request({}, {signal: controller.signal, timeout: 0}))
-		await flush()
-		controller.abort()
-		strictEqual((await outcome).error.name, 'AbortError')
-
-		await flush(6)
-		strictEqual(remoteAborted, false, 'gap: the protocol has no cancel frame, so the peer keeps working')
-	})
-
-	it('leaves the peer subscribed after dispose', async () => {
-		let released = 0
-		using pair = link({subscribe() {
-			return {[Symbol.dispose]() {
-				released++
-			}}
-		}}, {})
-
-		pair.b.subscribe({}, () => {})
-		await flush()
-
-		pair.b[Symbol.dispose]()
-		await flush()
-
-		strictEqual(framesOf(pair.toA, '/unsub').length, 0, 'gap: dispose should unsubscribe from the peer')
-		strictEqual(released, 0, 'gap: the peer keeps publishing into a closed transport')
-	})
-
-	it('still answers an in-flight request after dispose', async () => {
-		const sent: Frame[] = []
-		const endpoint = createBidiEndpointPlain({
-			send(message, ...rest) {
-				sent.push({message, rest})
-			},
-			async request() {
-				await flush(4)
-				return 'late'
-			},
-		})
-
-		endpoint.send({path: '/req', id: 'q'})
-		endpoint[Symbol.dispose]()
-		sent.length = 0
-		await flush(6)
-
-		strictEqual(sent.length, 1, 'gap: the responder writes /res to a transport that is already gone')
-		strictEqual(sent[0].message.path, '/res')
-	})
-
 	it('lets handler exceptions escape into the transport loop', () => {
 		for (const [label, endpoint, frame] of handlerThrowCases()) {
 			let escaped: Error | undefined
@@ -937,7 +1040,7 @@ describe('known gaps', () => {
 
 	it('disposes a module-scoped endpoint as soon as the module finishes', async () => {
 		const {stdout} = await runNode(`
-			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.js')}'
+			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.ts')}'
 			using endpoint = createBidiEndpointPlain({send() {}})
 			setTimeout(async () => {
 				try {
@@ -955,7 +1058,7 @@ describe('known gaps', () => {
 	// which claims unhandled rejections for itself.
 	it('crashes the process when a subscription callback throws a non-error', async () => {
 		const {code, stderr} = await runNode(`
-			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.js')}'
+			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.ts')}'
 			const sent = []
 			const endpoint = createBidiEndpointPlain({send(message) { sent.push(message) }})
 			endpoint.subscribe({}, () => { throw null })

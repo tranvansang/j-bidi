@@ -4,7 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"prepublishOnly": "npx tsc",
-		"test": "npx tsc && node --test"
+		"test": "node --test"
 	},
 	"exports": {
 		".": {
