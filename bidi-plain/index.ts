@@ -269,6 +269,8 @@ export function createBidiEndpointPlain({
 		subscribe<T>(this: void, body: any, onData: (data: T) => void, ...rest: any[]) {
 			const id = crypto.randomUUID()
 			if (!disposed) {
+				// a synchronous transport can deliver /pub before send() returns, so be ready first
+				subs[id] = onData
 				send(
 					{
 						path: '/sub',
@@ -277,7 +279,6 @@ export function createBidiEndpointPlain({
 					},
 					...rest,
 				)
-				subs[id] = onData
 			}
 			return {
 				[Symbol.dispose]() {

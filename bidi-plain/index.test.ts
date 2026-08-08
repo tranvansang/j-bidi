@@ -99,6 +99,32 @@ describe('round trip', () => {
 		strictEqual(framesOf(pair.toB, '/unsub')[0].message.id, framesOf(pair.toB, '/sub')[0].message.id)
 	})
 
+	// a peer that replays its current value on subscribe publishes before it returns its disposable,
+	// so on a synchronous transport the first /pub arrives while subscribe() is still running
+	it('delivers a publish that races back before subscribe returns', async () => {
+		let a: ReturnType<typeof createBidiEndpointPlain>
+		using stack = new DisposableStack()
+
+		const b = stack.use(createBidiEndpointPlain({
+			send(message) {
+				a.send(message)
+			},
+			subscribe(body, onData) {
+				onData('initial value')
+				return {[Symbol.dispose]() {}}
+			},
+		}))
+		a = stack.use(createBidiEndpointPlain({send(message) {
+			b.send(message)
+		}}))
+
+		const received: any[] = []
+		a.subscribe({}, data => void received.push(data))
+		await flush()
+
+		deepStrictEqual(received, ['initial value'])
+	})
+
 	it('keeps two subscriptions on separate ids', async () => {
 		const publishers: ((data: any) => void)[] = []
 		using pair = link({}, {subscribe(body, onData) {
@@ -990,30 +1016,6 @@ describe('known gaps', () => {
 			ok(escaped, `gap: ${label} should be contained inside send()`)
 			endpoint[Symbol.dispose]()
 		}
-	})
-
-	it('drops the first publish on a synchronous transport', async () => {
-		let a: ReturnType<typeof createBidiEndpointPlain>
-		using stack = new DisposableStack()
-
-		const b = stack.use(createBidiEndpointPlain({
-			send(message) {
-				a.send(message)
-			},
-			subscribe(body, onData) {
-				onData('immediate')
-				return {[Symbol.dispose]() {}}
-			},
-		}))
-		a = stack.use(createBidiEndpointPlain({send(message) {
-			b.send(message)
-		}}))
-
-		const received: any[] = []
-		a.subscribe({}, data => void received.push(data))
-		await flush()
-
-		deepStrictEqual(received, [], 'gap: subs[id] is registered after /sub is sent, so a sync peer publishes into nothing')
 	})
 
 	it('never answers a request when no handler is configured', async () => {
