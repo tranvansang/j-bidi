@@ -87,9 +87,9 @@ export function createBidiEndpointPlain({
 
 	// requests list we need to response when partner sends us
 	// need to abort local processes if the partner sends but connection closes before finishing processing
-	const reqs = stack.adopt(Object.create(null) as Record<string, () => void>, reqs => {
-		for (const [key, abort] of Object.entries(reqs)) {
-			abort?.()
+	const reqs = stack.adopt(Object.create(null) as Record<string, AbortController>, reqs => {
+		for (const [key, abortController] of Object.entries(reqs)) {
+			abortController.abort()
 			delete reqs[key]
 		}
 	})
@@ -153,9 +153,10 @@ export function createBidiEndpointPlain({
 						const {id, body} = message
 						if (!id) return
 						if (request) {
+							// unique per message, so it doubles as the identity of this run
 							const abortController = new AbortController()
-							reqs[id]?.()
-							reqs[id] = abortController.abort.bind(abortController)
+							reqs[id]?.abort()
+							reqs[id] = abortController
 							void (async () => {
 								try {
 									const responseBody = await request(body, abortController.signal)
@@ -174,7 +175,8 @@ export function createBidiEndpointPlain({
 										code: (e as any)?.code,
 									})
 								} finally {
-									delete reqs[id]
+									// a newer /req may own the id by now, and its entry must survive
+									if (reqs[id] === abortController) delete reqs[id]
 								}
 							})()
 						}
@@ -195,7 +197,7 @@ export function createBidiEndpointPlain({
 					{
 						const {id} = message
 						if (!id) return
-						reqs[id]?.()
+						reqs[id]?.abort()
 						delete reqs[id]
 					}
 					break

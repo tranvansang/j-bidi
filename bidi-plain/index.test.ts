@@ -628,6 +628,27 @@ describe('hostile and malformed frames', () => {
 		endpoint.send({path: '/unsub', id: 'same'})
 		deepStrictEqual(released, ['first', 'second'], 'unsub twice must not dispose twice')
 	})
+
+	it('keeps the newer request abortable when the peer reuses a /req id', async () => {
+		const signals: AbortSignal[] = []
+		using endpoint = createBidiEndpointPlain({
+			send() {},
+			async request(body, signal) {
+				signals.push(signal)
+				await flush(body.turns)
+				return 'done'
+			},
+		})
+
+		endpoint.send({path: '/req', id: 'dup', body: {turns: 1}})
+		endpoint.send({path: '/req', id: 'dup', body: {turns: 8}})
+		await flush(4)
+
+		strictEqual(signals[0].aborted, true, 'the replaced run is aborted right away')
+
+		endpoint.send({path: '/abort', id: 'dup'})
+		strictEqual(signals[1].aborted, true, 'the finished run must not have deleted the newer entry')
+	})
 })
 
 describe('dispose', () => {
