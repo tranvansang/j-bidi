@@ -6,7 +6,7 @@ Bring your own transport (WebSocket, Web Worker, `postMessage`, MessageChannel, 
 serializable messages to send and consumes messages you feed back in.
 
 For the binary (protobuf) encoding and bundled WebSocket (browser + Node `ws`) backends with auto-reconnect and
-heartbeat, see [`j-bidi`](../legacy).
+heartbeat, see [`j-bidi`](https://www.npmjs.com/package/j-bidi).
 
 ## Requirements
 

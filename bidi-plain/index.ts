@@ -38,7 +38,7 @@ type SendPayload =
 	| {
 			path: '/push'
 			id: string
-			body?: string
+			body?: any
 	  }
 
 export type BidiEndpointPlain = ReturnType<typeof createBidiEndpointPlain>
