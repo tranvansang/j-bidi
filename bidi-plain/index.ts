@@ -149,8 +149,8 @@ export function createBidiEndpointPlain({
 									send({
 										path: '/res',
 										id,
-										error: (e as Error).message,
-										code: (e as any).code,
+										error: (e as Error)?.message || String(e) || 'unknown error',
+										code: (e as any)?.code,
 									})
 								} finally {
 									delete reqs[id]

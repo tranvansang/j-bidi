@@ -1,6 +1,7 @@
 {
 	"name": "bidi-plain",
 	"version": "0.0.2",
+	"type": "module",
 	"scripts": {
 		"prepublishOnly": "npx tsc"
 	},
@@ -15,9 +16,6 @@
 		"index.d.ts"
 	],
 	"devDependencies": {
-		"typescript": "^6.0.2"
-	},
-	"dependencies": {
-		"j-atom": "0.2.0-alpha.2"
+		"typescript": "^7.0.2"
 	}
 }
