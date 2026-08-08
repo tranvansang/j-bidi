@@ -160,14 +160,14 @@ export function createBidiEndpointPlain({
 							void (async () => {
 								try {
 									const responseBody = await request(body, abortController.signal)
-									if (disposed) return
+									if (disposed || reqs[id] !== abortController) return
 									send({
 										path: '/res',
 										id,
 										body: responseBody,
 									})
 								} catch (e) {
-									if (disposed) return
+									if (disposed || reqs[id] !== abortController) return
 									send({
 										path: '/res',
 										id,

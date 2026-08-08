@@ -294,7 +294,7 @@ describe('cancellation and timeouts', () => {
 		strictEqual(framesOf(pair.toB, '/abort').length, 0, 'an answered request has nothing to abort')
 	})
 
-	it('still answers a peer that ignores the abort', async () => {
+	it('swallows the reply of an aborted request, even from a handler that ignores the signal', async () => {
 		const sent: Frame[] = []
 		using endpoint = createBidiEndpointPlain({
 			send(message, ...rest) {
@@ -310,8 +310,7 @@ describe('cancellation and timeouts', () => {
 		endpoint.send({path: '/abort', id: 'q'})
 		await flush(4)
 
-		strictEqual(sent.length, 1, '/abort cancels the signal, it does not cancel the reply')
-		strictEqual(sent[0].message.body, 'stubborn')
+		strictEqual(sent.length, 0, 'nobody is waiting for this answer anymore')
 	})
 
 	it('ignores an abort for a request it does not know', () => {
@@ -627,6 +626,34 @@ describe('hostile and malformed frames', () => {
 
 		endpoint.send({path: '/unsub', id: 'same'})
 		deepStrictEqual(released, ['first', 'second'], 'unsub twice must not dispose twice')
+	})
+
+	it('answers a reused /req id only from the run that still owns it', async () => {
+		const sent: Frame[] = []
+		const started: number[] = []
+		using endpoint = createBidiEndpointPlain({
+			send(message, ...rest) {
+				sent.push({message, rest})
+			},
+			async request(body) {
+				started.push(body.run)
+				await flush(body.turns)
+				if (body.fail) throw new Error(`run ${body.run} failed`)
+				return body.run
+			},
+		})
+
+		// the replaced run resolves late
+		endpoint.send({path: '/req', id: 'a', body: {run: 1, turns: 6}})
+		endpoint.send({path: '/req', id: 'a', body: {run: 2, turns: 1}})
+		// the replaced run rejects late
+		endpoint.send({path: '/req', id: 'b', body: {run: 3, turns: 6, fail: true}})
+		endpoint.send({path: '/req', id: 'b', body: {run: 4, turns: 1}})
+		await flush(10)
+
+		deepStrictEqual(started, [1, 2, 3, 4], 'every run gets to start')
+		strictEqual(sent.length, 2, 'a replaced run must not answer under an id it no longer owns')
+		deepStrictEqual(Object.fromEntries(sent.map(frame => [frame.message.id, frame.message.body])), {a: 2, b: 4})
 	})
 
 	it('keeps the newer request abortable when the peer reuses a /req id', async () => {
@@ -995,29 +1022,6 @@ describe('known gaps', () => {
 		const {error} = await settle(pair.a.request({}, {timeout: 20}))
 		strictEqual(error.message, 'timeout', 'gap: the peer should reply with an error instead of stalling')
 		strictEqual(framesOf(pair.toA, '/res').length, 0)
-	})
-
-	it('answers twice when the peer reuses a request id', async () => {
-		const sent: Frame[] = []
-		let calls = 0
-		using endpoint = createBidiEndpointPlain({
-			send(message, ...rest) {
-				sent.push({message, rest})
-			},
-			async request(body, signal) {
-				const own = ++calls
-				await flush(own === 1 ? 6 : 2)
-				if (signal.aborted) throw new Error('aborted')
-				return own
-			},
-		})
-
-		endpoint.send({path: '/req', id: 'dup'})
-		endpoint.send({path: '/req', id: 'dup'})
-		await flush(10)
-
-		strictEqual(sent.length, 2, 'gap: both handlers answer under the same id')
-		deepStrictEqual(sent.map(frame => frame.message.id), ['dup', 'dup'])
 	})
 
 	it('disposes a replaced subscription twice when the handler returns nothing', async () => {
