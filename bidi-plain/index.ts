@@ -52,6 +52,8 @@ export function createBidiEndpointPlain({
 	using stack = new DisposableStack()
 
 	let pong: (() => void) | undefined
+	let disposed = false
+	stack.defer(() => void (disposed = true))
 
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
@@ -63,11 +65,24 @@ export function createBidiEndpointPlain({
 		}
 	})
 
-	// callback of subscription we are subscribing to
-	const subs: Record<string, (data: any) => any> = Object.create(null)
+	// callback of subscription we are subscribing to. need to drop when
+	// - we unsubscribe
+	// - connection closes
+	const subs = stack.adopt(Object.create(null) as Record<string, (data: any) => any>, subs => {
+		for (const key of Object.keys(subs)) delete subs[key]
+	})
 
 	// requests we sent to partner and are waiting for response
-	const defers: Record<string, PromiseWithResolvers<any>> = Object.create(null)
+	// need to settle them when connection closes, else callers hang until timeout (forever if timeout is 0)
+	const defers = stack.adopt(
+		Object.create(null) as Record<string, PromiseWithResolvers<any>>,
+		defers => {
+			for (const [key, defer] of Object.entries(defers)) {
+				defer.reject(new Error('endpoint disposed'))
+				delete defers[key]
+			}
+		},
+	)
 
 	// requests list we need to response when partner sends us
 	// need to abort local processes if the partner sends but connection closes before finishing processing
@@ -81,6 +96,7 @@ export function createBidiEndpointPlain({
 	const moved = stack.move()
 	return {
 		send(this: void, message: SendPayload) {
+			if (disposed) return
 			switch (message?.path) {
 				case '/ping':
 					send({path: '/pong'})
@@ -195,6 +211,8 @@ export function createBidiEndpointPlain({
 			} = {},
 			...rest: any[]
 		) {
+			if (disposed) throw new Error('endpoint disposed')
+
 			using stack = new DisposableStack()
 			const defer = Promise.withResolvers<T>()
 
@@ -207,7 +225,7 @@ export function createBidiEndpointPlain({
 			if (signal?.aborted) defer.reject(abortError)
 			else {
 				signal?.addEventListener('abort', () => defer.reject(abortError), {
-					signal: stack.adopt(new AbortController(), controller => controller.abort()).signal,
+					signal: stack.adopt(new AbortController(), ab => ab.abort()).signal,
 				})
 
 				if (timeout)
@@ -230,23 +248,26 @@ export function createBidiEndpointPlain({
 		},
 		subscribe<T>(this: void, body: any, onData: (data: T) => void, ...rest: any[]) {
 			const id = crypto.randomUUID()
-			send(
-				{
-					path: '/sub',
-					id,
-					body,
-				},
-				...rest,
-			)
-			subs[id] = onData
+			if (!disposed) {
+				send(
+					{
+						path: '/sub',
+						id,
+						body,
+					},
+					...rest,
+				)
+				subs[id] = onData
+			}
 			return {
 				[Symbol.dispose]() {
 					delete subs[id]
-					send({path: '/unsub', id})
+					if (!disposed) send({path: '/unsub', id})
 				},
 			}
 		},
 		push(body: any, ...rest: any[]) {
+			if (disposed) return
 			send(
 				{
 					path: '/push',
