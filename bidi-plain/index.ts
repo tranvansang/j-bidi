@@ -56,7 +56,7 @@ export function createBidiEndpointPlain({
 	// subscription to response to partner. need to unsub when
 	// - partner unsubscribes
 	// - connection closes
-	const allDisposable = stack.adopt({} as Record<string, Disposable>, allDisposable => {
+	const allDisposable = stack.adopt(Object.create(null) as Record<string, Disposable>, allDisposable => {
 		for (const [key, disposable] of Object.entries(allDisposable)) {
 			disposable[Symbol.dispose]()
 			delete allDisposable[key]
@@ -64,14 +64,14 @@ export function createBidiEndpointPlain({
 	})
 
 	// callback of subscription we are subscribing to
-	const subs: Record<string, (data: any) => any> = {}
+	const subs: Record<string, (data: any) => any> = Object.create(null)
 
 	// requests we sent to partner and are waiting for response
-	const defers: Record<string, PromiseWithResolvers<any>> = {}
+	const defers: Record<string, PromiseWithResolvers<any>> = Object.create(null)
 
 	// requests list we need to response when partner sends us
 	// need to abort local processes if the partner sends but connection closes before finishing processing
-	const reqs = stack.adopt({} as Record<string, () => void>, reqs => {
+	const reqs = stack.adopt(Object.create(null) as Record<string, () => void>, reqs => {
 		for (const [key, abort] of Object.entries(reqs)) {
 			abort?.()
 			delete reqs[key]
