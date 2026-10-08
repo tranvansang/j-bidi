@@ -20,9 +20,11 @@ export function connectWsShared<T extends WebSocket | WsWebSocket>(
 		connectedDefer.resolve()
 	}
 	ws.onerror = (e: any) => {
-		connectedDefer.reject(e)
+		// reject with an Error, as onclose does: the event is not one, and in a browser says nothing
+		const error = new Error(`WebSocket error${e?.message ? ` (${e.message})` : ''}`, {cause: e})
+		connectedDefer.reject(error)
 		// only reject disconnectedDefer, AFTER connected. Otherwise, nodejs will crash since disconnectedDefer.promise is not awaited
-		if (connected) disconnectedDefer.reject(e)
+		if (connected) disconnectedDefer.reject(error)
 	}
 	ws.onclose = (evt: CloseEvent) => {
 		connectedDefer.reject(new Error(`WebSocket closed before open (${evt.code} ${evt.reason || ''})`))
