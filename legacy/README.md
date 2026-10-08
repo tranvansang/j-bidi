@@ -23,7 +23,7 @@ npm i j-bidi
 - **Request-Response** — RPC-style calls with timeout and AbortSignal support
 - **Subscriptions** — pub/sub pattern with automatic cleanup
 - **Push** — fire-and-forget messages
-- **Ping/Pong** — built-in heartbeat (30s interval, 5s timeout)
+- **Ping/Pong** — built-in heartbeat (30s interval, 5s timeout by default)
 - **Auto-reconnect** — retry with backoff on disconnect
 - **Binary encoding** — compact protobuf wire format
 - **Cross-platform** — browser (WebSocket API) and Node.js (`ws`)
@@ -164,21 +164,21 @@ Returns a `Disposable` endpoint with:
 
 #### `createBidiEndpointWeb(endpointAtom, wsUrl, options?)`
 
-Connect via browser WebSocket with auto-reconnect and heartbeat. Returns a `DisposableStack`.
+Connect via browser WebSocket with auto-reconnect and heartbeat. Returns a `DisposableStack`. Options: `subscribe?`, `request?`, `push?`, `pingInterval?` (ms, default `30_000`), `pongTimeout?` (ms, default `5_000`).
 
 ### `j-bidi/node`
 
 #### `createBidiEndpointNode(endpointAtom, wsUrl, options?)`
 
-Connect via Node.js `ws` with auto-reconnect and heartbeat. Returns a `DisposableStack`.
+Connect via Node.js `ws` with auto-reconnect and heartbeat. Returns a `DisposableStack`. Options: same as `createBidiEndpointWeb`.
 
 #### `connectWsNode(options)`
 
 Low-level Node.js WebSocket connection. Returns a `Disposable & Promise<void>`. Options: `url`, `atom`, `resetBackoff?`, `disableDeflate?`.
 
-#### `createNodeWsHeartBeat(ws)`
+#### `createNodeWsHeartBeat(ws, options?)`
 
-Add ping/pong heartbeat to a Node.js WebSocket. Returns a `Disposable` (use with `stack.use()` or `using`).
+Add ping/pong heartbeat to a Node.js WebSocket. Options: `pingInterval?` (ms, default `30_000`), `pongTimeout?` (ms, default `5_000`). Returns a `Disposable` (use with `stack.use()` or `using`).
 
 ## License
 

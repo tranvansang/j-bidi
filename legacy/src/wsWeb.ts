@@ -18,11 +18,17 @@ function connectWsWeb({url, ...params}: {atom: Atom<WebSocket | undefined>; url:
 export function createBidiEndpointWeb(
 	endpointAtom: Atom<BidiEndpointBinary | undefined>,
 	wsPath: string,
-	options?: {
+	{
+		pingInterval = 30_000,
+		pongTimeout = 5_000,
+		...options
+	}: {
 		subscribe?(body: any, onData: (data: any) => void): void | Disposable
 		request?(body: any, signal: AbortSignal): Promise<any>
 		push?(body: any): any
-	},
+		pingInterval?: number // ms between a pong and the next ping, default 30s
+		pongTimeout?: number // ms to wait for a pong before dropping the socket, default 5s
+	} = {},
 ) {
 	using stack = new DisposableStack()
 
@@ -43,7 +49,7 @@ export function createBidiEndpointWeb(
 					if (pongTimer) clearTimeout(pongTimer)
 					pongTimer = undefined
 					if (pingTimer) clearTimeout(pingTimer)
-					pingTimer = setTimeout(ping, 30_000)
+					pingTimer = setTimeout(ping, pingInterval)
 				}
 				ping()
 				return {
@@ -70,12 +76,15 @@ export function createBidiEndpointWeb(
 	)
 
 	const moved = stack.move()
-	return Object.assign((resetBackoff: () => any) =>
+	return Object.assign(
+		(resetBackoff: () => any) =>
 			connectWsWeb({
 				atom: wsAtom,
 				url: wsPath,
 				resetBackoff,
-			}), {
-		[Symbol.dispose]: moved[Symbol.dispose].bind(moved),
-	})
+			}),
+		{
+			[Symbol.dispose]: moved[Symbol.dispose].bind(moved),
+		},
+	)
 }
