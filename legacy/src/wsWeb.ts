@@ -63,11 +63,11 @@ export function createBidiEndpointWeb(
 					endpoint.ping()
 					pongTimer = setTimeout(() => {
 						console.warn('ws ping timeout')
-						if (![WebSocket.CONNECTING, WebSocket.OPEN].includes(ws.readyState as any)) return
-						ws.close(1000, 'ping timeout')
+						if ([WebSocket.CONNECTING, WebSocket.OPEN].includes(ws.readyState as any)) ws.close(1000, 'ping timeout')
 						// on a dead link, the close handshake never completes and the browser fires onclose only after its own
 						// timeout (~60s in Chrome), and there's no terminate() like in ws. Report the disconnect now so the
-						// caller reconnects; the real close event later is a no-op since the promises are already settled.
+						// caller reconnects, also when already CLOSING (a handshake started earlier may hang the same way);
+						// the real close event later is a no-op since the promises are already settled.
 						ws.onclose?.(new CloseEvent('close', {code: 1006, reason: 'ping timeout'}))
 					}, pongTimeout)
 				}
