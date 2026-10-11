@@ -30,7 +30,13 @@ export function createBidiEndpointBinary({
 	const subs: Record<string, (data: Uint8Array) => any> = {}
 
 	// requests we sent to partner and are waiting for response
-	const defers: Record<string, PromiseWithResolvers<Uint8Array>> = {}
+	// need to settle them when connection closes, else callers hang until timeout (forever if timeout is 0)
+	const defers = stack.adopt({} as Record<string, PromiseWithResolvers<Uint8Array>>, defers => {
+		for (const [key, defer] of Object.entries(defers)) {
+			defer.reject(new Error('endpoint disposed'))
+			delete defers[key]
+		}
+	})
 
 	// requests list we need to response when partner sends us
 	// need to abort local processes if the partner sends but connection closes before finishing processing
@@ -40,6 +46,9 @@ export function createBidiEndpointBinary({
 			delete reqs[key]
 		}
 	})
+
+	let disposed = false
+	stack.defer(() => void (disposed = true))
 
 	const moved = stack.move()
 	return {
@@ -193,10 +202,12 @@ export function createBidiEndpointBinary({
 				signal?: AbortSignal
 			} = {},
 		) {
+			if (disposed) throw new Error('endpoint disposed')
+
 			using stack = new DisposableStack()
 			const defer = Promise.withResolvers<Uint8Array>()
 
-			const id = crypto.randomUUID()
+			const id = randomUUID()
 			defers[id]?.reject(new Error('duplicated request id'))
 			defers[id] = defer
 			stack.defer(() => void delete defers[id])
@@ -227,7 +238,7 @@ export function createBidiEndpointBinary({
 			return await defer.promise
 		},
 		subscribe(this: void, body: any, onData: (data: Uint8Array) => void) {
-			const id = crypto.randomUUID()
+			const id = randomUUID()
 			send(
 				ProtoMessage.encode({
 					sub: {
@@ -252,7 +263,7 @@ export function createBidiEndpointBinary({
 			send(
 				ProtoMessage.encode({
 					push: {
-						id: crypto.randomUUID(),
+						id: randomUUID(),
 						body: protoEncodeJson(body),
 					},
 				}).finish(),
@@ -264,4 +275,14 @@ export function createBidiEndpointBinary({
 
 function logJson(json: any) {
 	console.log(JSON.stringify(json))
+}
+
+// crypto.randomUUID() only exists in secure contexts (https, localhost), so it is undefined on an http website.
+// getRandomValues() works in both, so build the same v4 UUID from it
+function randomUUID() {
+	const bytes = crypto.getRandomValues(new Uint8Array(16))
+	bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+	bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+	const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }

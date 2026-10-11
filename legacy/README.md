@@ -1,7 +1,7 @@
 # j-bidi
 
 Bidirectional messaging library supporting request-response, subscriptions, and push notifications, encoded as binary (protobuf).
-Ships with browser WebSocket and Node.js `ws` backends, with auto-reconnect and heartbeat.
+Ships with browser WebSocket and Node.js `ws` backends, with a heartbeat. A connection rejects once its socket closes, so reconnecting is a retry loop around it.
 
 If you only need plain JSON over your own transport (no protobuf, no bundled WebSocket), use [`bidi-plain`](../bidi-plain) instead — it's the transport-agnostic core.
 
@@ -24,7 +24,7 @@ npm i j-bidi
 - **Subscriptions** — pub/sub pattern with automatic cleanup
 - **Push** — fire-and-forget messages
 - **Ping/Pong** — built-in heartbeat (30s interval, 5s timeout by default)
-- **Auto-reconnect** — retry with backoff on disconnect
+- **Reconnect** — a connection rejects once its socket closes, ready for your retry loop
 - **Binary encoding** — compact protobuf wire format
 - **Cross-platform** — browser (WebSocket API) and Node.js (`ws`)
 
@@ -36,10 +36,11 @@ npm i j-bidi
 import {type BidiEndpointBinary, createBidiEndpointWeb} from 'j-bidi'
 import {makeAtom} from 'j-atom'
 
+// holds the endpoint while a connection is open
 const endpointAtom = makeAtom<BidiEndpointBinary | undefined>()
 
-// Connect with auto-reconnect and heartbeat
-using connection = createBidiEndpointWeb(endpointAtom, 'wss://example.com/ws', {
+// What makes one connection, with a heartbeat
+using connect = createBidiEndpointWeb(endpointAtom, 'wss://example.com/ws', {
 	subscribe(body, onData) {
 		if (body?.path === '/topic') {
 			return dataAtom.sub(data => onData(encode(data)))
@@ -71,6 +72,22 @@ const result = await endpoint?.request(
 endpoint?.push({path: '/notify', body: {event: 'click'}})
 ```
 
+One connection never resolves, and rejects once its socket closes, misses a pong or can't open. Keep one in a loop to reconnect:
+
+```ts
+let failures = 0
+while (true) {
+	try {
+		// its argument is called when the socket opens: start the backoff over
+		using connection = connect(() => void (failures = 0))
+		await connection
+	} catch (e) {
+		console.warn(e)
+		await new Promise(resolve => setTimeout(resolve, Math.min(1000 * 2 ** failures++, 30_000)))
+	}
+}
+```
+
 ### Node.js
 
 ```ts
@@ -79,7 +96,8 @@ import {makeAtom} from 'j-atom'
 
 const endpointAtom = makeAtom<BidiEndpointBinary | undefined>()
 
-using connection = createBidiEndpointNode(endpointAtom, 'wss://example.com/ws', {
+// as in the browser: call `connect(resetBackoff)` in your retry loop
+using connect = createBidiEndpointNode(endpointAtom, 'wss://example.com/ws', {
 	subscribe(body, onData) {
 		if (body?.path === '/topic') {
 			return sensorAtom.sub(data => onData(encode(data)))
@@ -157,20 +175,20 @@ Create a protobuf-encoded endpoint. Options:
 Returns a `Disposable` endpoint with:
 
 - `send(message)` — feed incoming messages from the peer
-- `request(body, options?)` — send a request (`options: {timeout?, signal?}`)
+- `request(body, options?)` — send a request (`options: {timeout?, signal?}`); it rejects with `endpoint disposed` when the endpoint is disposed before the response
 - `subscribe(body, onData)` — subscribe to a topic, returns `Disposable`
 - `push(body)` — send a push message
 - `[Symbol.dispose]()` — cleanup (use with `using`)
 
 #### `createBidiEndpointWeb(endpointAtom, wsUrl, options?)`
 
-Connect via browser WebSocket with auto-reconnect and heartbeat. Returns a `DisposableStack`. Options: `subscribe?`, `request?`, `push?`, `pingInterval?` (ms, default `30_000`), `pongTimeout?` (ms, default `5_000`).
+Prepare connections over the browser WebSocket, with a heartbeat. Returns a `Disposable` function `connect(resetBackoff)`. Each call opens one connection and returns a `Disposable & Promise<void>` that never resolves, and rejects with an `Error` once the socket closes, misses a pong or can't open. `endpointAtom` holds the endpoint while a connection is open, and `resetBackoff()` is called when one opens. Call `connect` again to reconnect, typically in a retry loop. Options: `subscribe?`, `request?`, `push?`, `pingInterval?` (ms, default `30_000`), `pongTimeout?` (ms, default `5_000`).
 
 ### `j-bidi/node`
 
 #### `createBidiEndpointNode(endpointAtom, wsUrl, options?)`
 
-Connect via Node.js `ws` with auto-reconnect and heartbeat. Returns a `DisposableStack`. Options: same as `createBidiEndpointWeb`.
+The same over Node.js `ws`. Returns the same `connect(resetBackoff)` function. Options: same as `createBidiEndpointWeb`.
 
 #### `connectWsNode(options)`
 
