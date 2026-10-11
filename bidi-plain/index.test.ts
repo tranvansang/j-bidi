@@ -192,6 +192,23 @@ describe('round trip', () => {
 		for (const id of ids) match(id, uuidPattern)
 		strictEqual(new Set(ids).size, 4)
 	})
+
+	it('works on an http website, where crypto.randomUUID is undefined', async t => {
+		t.mock.property(Object.getPrototypeOf(crypto), 'randomUUID', undefined)
+		using pair = link({}, {async request(body) {
+			return {echo: body}
+		}})
+
+		deepStrictEqual(await pair.a.request({hi: 1}), {echo: {hi: 1}})
+		pair.a.push({})
+		pair.a.subscribe({}, () => {})
+		await flush()
+
+		const ids = pair.toB.map(frame => frame.message.id)
+		strictEqual(ids.length, 3)
+		for (const id of ids) match(id, uuidPattern)
+		strictEqual(new Set(ids).size, 3)
+	})
 })
 
 describe('cancellation and timeouts', () => {

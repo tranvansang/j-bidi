@@ -277,9 +277,11 @@ function logJson(json: any) {
 	console.log(JSON.stringify(json))
 }
 
-// crypto.randomUUID() only exists in secure contexts (https, localhost), so it is undefined on an http website.
-// getRandomValues() works in both, so build the same v4 UUID from it
 function randomUUID() {
+	if (crypto.randomUUID) return crypto.randomUUID()
+
+	// crypto.randomUUID() only exists in secure contexts (https, localhost), so it is undefined on an http website.
+	// There, build the same v4 UUID from getRandomValues(), which works in both
 	const bytes = crypto.getRandomValues(new Uint8Array(16))
 	bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
 	bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10

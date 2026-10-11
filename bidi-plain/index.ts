@@ -232,7 +232,7 @@ export function createBidiEndpointPlain({
 			using stack = new DisposableStack()
 			const defer = Promise.withResolvers<T>()
 
-			const id = crypto.randomUUID()
+			const id = randomUUID()
 			defers[id]?.reject(new Error('duplicated request id'))
 			defers[id] = defer
 			stack.defer(() => void delete defers[id])
@@ -268,7 +268,7 @@ export function createBidiEndpointPlain({
 			}
 		},
 		subscribe<T>(this: void, body: any, onData: (data: T) => void, ...rest: any[]) {
-			const id = crypto.randomUUID()
+			const id = randomUUID()
 			if (!disposed) {
 				// a synchronous transport can deliver /pub before send() returns, so be ready first
 				subs[id] = onData
@@ -293,7 +293,7 @@ export function createBidiEndpointPlain({
 			send(
 				{
 					path: '/push',
-					id: crypto.randomUUID(),
+					id: randomUUID(),
 					body,
 				},
 				...rest,
@@ -305,4 +305,16 @@ export function createBidiEndpointPlain({
 
 function logJson(json: any) {
 	console.log(JSON.stringify(json))
+}
+
+function randomUUID() {
+	if (crypto.randomUUID) return crypto.randomUUID()
+
+	// crypto.randomUUID() only exists in secure contexts (https, localhost), so it is undefined on an http website.
+	// There, build the same v4 UUID from getRandomValues(), which works in both
+	const bytes = crypto.getRandomValues(new Uint8Array(16))
+	bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+	bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10
+	const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
