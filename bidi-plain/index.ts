@@ -139,7 +139,7 @@ export function createBidiEndpointPlain({
 								await subs[id]?.(body)
 							} catch (e) {
 								logJson({
-									level: 'warn',
+									severity: 'warn',
 									message: 'bidirectional message pub error',
 									error: (e as Error).message,
 									trace: (e as Error).stack,
