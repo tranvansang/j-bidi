@@ -134,19 +134,7 @@ export function createBidiEndpointPlain({
 					{
 						const {id, body} = message
 						if (!id) return
-						void (async () => {
-							try {
-								await subs[id]?.(body)
-							} catch (e) {
-								logJson({
-									severity: 'warn',
-									message: 'bidirectional message pub error',
-									error: (e as Error).message,
-									trace: (e as Error).stack,
-									id,
-								})
-							}
-						})()
+						subs[id]?.(body)
 					}
 					break
 				case '/req':
@@ -301,10 +289,6 @@ export function createBidiEndpointPlain({
 		},
 		[Symbol.dispose]: moved[Symbol.dispose].bind(moved),
 	}
-}
-
-function logJson(json: any) {
-	console.log(JSON.stringify(json))
 }
 
 function randomUUID() {
