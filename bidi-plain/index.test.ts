@@ -461,48 +461,56 @@ describe('error propagation', () => {
 		strictEqual(await endpoint.request({}), 'ok')
 	})
 
-	it('contains and logs an error thrown by a local subscription callback', async t => {
-		const logged: any[] = []
-		t.mock.method(console, 'log', (line: string) => void logged.push(JSON.parse(line)))
+	// Only a request handler may throw. Whatever a push or subscribe handler or a subscription
+	// callback throws is not caught: it leaves send() into the transport's message listener.
+	it('lets a push, subscribe or subscription callback throw out of send() unchanged', () => {
+		for (const thrown of [new Error('handler failed'), null, 'thrown string']) {
+			const sent: any[] = []
+			using endpoint = createBidiEndpointPlain({
+				send(message) {
+					sent.push(message)
+				},
+				push() {
+					throw thrown
+				},
+				subscribe() {
+					throw thrown
+				},
+			})
+			endpoint.subscribe({}, () => {
+				throw thrown
+			})
 
-		let publish: ((data: any) => void) | undefined
-		using pair = link({}, {subscribe(body, onData) {
-			publish = onData
-		}})
-
-		pair.a.subscribe({}, () => {
-			throw new Error('callback failed')
-		})
-		await flush()
-
-		publish?.('data')
-		await flush()
-
-		strictEqual(logged.length, 1)
-		strictEqual(logged[0].level, 'warn')
-		strictEqual(logged[0].message, 'bidirectional message pub error')
-		strictEqual(logged[0].error, 'callback failed')
-		strictEqual(logged[0].id, framesOf(pair.toB, '/sub')[0].message.id)
+			const frames: any[] = [
+				{path: '/push', id: 'p', body: 1},
+				{path: '/sub', id: 's'},
+				{path: '/pub', id: sent[0].id, body: 1},
+			]
+			for (const frame of frames) {
+				let escaped: unknown = 'nothing escaped'
+				try {
+					endpoint.send(frame)
+				} catch (err) {
+					escaped = err
+				}
+				strictEqual(escaped, thrown, `${frame.path} must rethrow ${String(thrown)} as is`)
+			}
+		}
 	})
 
-	it('contains a rejected async subscription callback', async t => {
-		const logged: any[] = []
-		t.mock.method(console, 'log', (line: string) => void logged.push(JSON.parse(line)))
+	// Run out of process: this crash cannot be observed from inside the test runner,
+	// which claims unhandled rejections for itself.
+	it('leaves a rejected async subscription callback unhandled, which crashes node', async () => {
+		const {code, stderr} = await runNode(`
+			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.ts')}'
+			const sent = []
+			const endpoint = createBidiEndpointPlain({send(message) { sent.push(message) }})
+			endpoint.subscribe({}, async () => { throw new Error('async callback failed') })
+			endpoint.send({path: '/pub', id: sent[0].id, body: 1})
+		`)
 
-		let publish: ((data: any) => void) | undefined
-		using pair = link({}, {subscribe(body, onData) {
-			publish = onData
-		}})
-
-		pair.a.subscribe({}, async () => {
-			throw new Error('async callback failed')
-		})
-		await flush()
-
-		publish?.('data')
-		await flush()
-
-		strictEqual(logged[0].error, 'async callback failed')
+		notStrictEqual(code, 0)
+		match(stderr, /async callback failed/)
 	})
 })
 
@@ -1117,21 +1125,6 @@ describe('known gaps', () => {
 
 		strictEqual(stdout.trim(), 'endpoint disposed', 'gap: the readme suggests top-level using, which disposes at module end')
 	})
-
-	// Run out of process: this crash cannot be observed from inside the test runner,
-	// which claims unhandled rejections for itself.
-	it('crashes the process when a subscription callback throws a non-error', async () => {
-		const {code, stderr} = await runNode(`
-			import {createBidiEndpointPlain} from '${import.meta.resolve('./index.ts')}'
-			const sent = []
-			const endpoint = createBidiEndpointPlain({send(message) { sent.push(message) }})
-			endpoint.subscribe({}, () => { throw null })
-			endpoint.send({path: '/pub', id: sent[0].id, body: 1})
-		`)
-
-		notStrictEqual(code, 0, 'gap: the /pub catch block reads .message off the thrown value')
-		match(stderr, /Cannot read properties of null/)
-	})
 })
 
 function link(aOpts: any = {}, bOpts: any = {}) {
@@ -1160,12 +1153,6 @@ function framesOf(frames: Frame[], path: string) {
 
 function handlerThrowCases() {
 	const cases: [string, ReturnType<typeof createBidiEndpointPlain>, any][] = [
-		['a push handler', createBidiEndpointPlain({send() {}, push() {
-			throw new Error('push failed')
-		}}), {path: '/push', id: 'p', body: 1}],
-		['a subscribe handler', createBidiEndpointPlain({send() {}, subscribe() {
-			throw new Error('subscribe failed')
-		}}), {path: '/sub', id: 's'}],
 		['a transport that rejects the /pong reply', createBidiEndpointPlain({send() {
 			throw new Error('transport closed')
 		}}), {path: '/ping'}],
