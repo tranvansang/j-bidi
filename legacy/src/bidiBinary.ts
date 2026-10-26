@@ -58,7 +58,7 @@ export function createBidiEndpointBinary({
 					return ProtoMessage.decode(message) as any
 				} catch (e) {
 					logJson({
-						severity: 'WARN',
+						severity: 'WARNING',
 						message: 'bidirectional message decode error',
 						error: (e as Error).message,
 						trace: (e as Error).stack,
@@ -83,7 +83,7 @@ export function createBidiEndpointBinary({
 					decodedBody = protoDecodeJson(body)
 				} catch (e) {
 					return logJson({
-						severity: 'WARN',
+						severity: 'WARNING',
 						message: 'bidirectional message decode error for sub',
 						error: (e as Error).message,
 						trace: (e as Error).stack,
@@ -115,7 +115,7 @@ export function createBidiEndpointBinary({
 						await subs[id]?.(body)
 					} catch (e) {
 						logJson({
-							severity: 'WARN',
+							severity: 'WARNING',
 							message: 'bidirectional message pub error',
 							error: (e as Error).message,
 							trace: (e as Error).stack,
@@ -171,7 +171,7 @@ export function createBidiEndpointBinary({
 					decodedBody = protoDecodeJson(body)
 				} catch (e) {
 					return logJson({
-						severity: 'WARN',
+						severity: 'WARNING',
 						message: 'bidirectional message decode error for push',
 						error: (e as Error).message,
 						trace: (e as Error).stack,

@@ -30,7 +30,7 @@ export function createNodeWsHeartBeat(
 		ws.ping(() => {}) // do nothing
 		pongTimer = setTimeout(() => {
 			logJson({
-				severity: 'WARN',
+				severity: 'WARNING',
 				message: 'ws ping timeout',
 			})
 			if ([WebSocket.CONNECTING, WebSocket.OPEN].includes(ws.readyState as any)) ws.close(1000, 'ping timeout')
