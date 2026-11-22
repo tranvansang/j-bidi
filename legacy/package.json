@@ -1,6 +1,6 @@
 {
 	"name": "j-bidi",
-	"version": "0.0.5",
+	"version": "0.0.6",
 	"type": "module",
 	"scripts": {
 		"prepublishOnly": "npx tsc"
@@ -23,7 +23,7 @@
 		"typescript": "^7.0.2"
 	},
 	"dependencies": {
-		"j-atom": "^0.2.0",
+		"j-atom": "^0.3.0",
 		"protobufjs": "^8.8.0",
 		"ws": "^8.22.0"
 	}
